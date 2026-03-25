@@ -1,7 +1,11 @@
 import cors from "cors";
-import express from "express";
+import express, { Response } from "express";
 import { z } from "zod";
 import { prisma } from "./db.js";
+
+function sendError(res: Response, status: number, message: string, code?: string) {
+  return res.status(status).json({ error: message, ...(code ? { code } : {}) });
+}
 
 export function createApp() {
   const app = express();
@@ -26,8 +30,7 @@ export function createApp() {
     });
 
     if (!profile) {
-      res.status(404).json({ error: "Profile not found" });
-      return;
+      return sendError(res, 404, "Profile not found");
     }
 
     res.json(profile);
@@ -58,8 +61,7 @@ export function createApp() {
     });
 
     if (!profile) {
-      res.status(404).json({ error: "Profile not found" });
-      return;
+      return sendError(res, 404, "Profile not found");
     }
 
     const where = {
@@ -84,8 +86,7 @@ export function createApp() {
     const parsed = supportPayloadSchema.safeParse(req.body);
 
     if (!parsed.success) {
-      res.status(400).json({ error: parsed.error.flatten() });
-      return;
+      return sendError(res, 400, "Invalid request data", "VALIDATION_ERROR");
     }
 
     const supportRecord = await prisma.supportTransaction.create({
