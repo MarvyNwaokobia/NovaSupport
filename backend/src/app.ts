@@ -86,7 +86,7 @@ export function createApp() {
     const parsed = supportPayloadSchema.safeParse(req.body);
 
     if (!parsed.success) {
-      return sendError(res, 400, "Invalid request data", "VALIDATION_ERROR");
+      return res.status(400).json({ error: parsed.error.flatten() });
     }
 
     const supportRecord = await prisma.supportTransaction.create({
