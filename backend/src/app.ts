@@ -1,5 +1,6 @@
 import cors from "cors";
 import express, { Response } from "express";
+import morgan from "morgan";
 import { z } from "zod";
 import { prisma } from "./db.js";
 
@@ -12,30 +13,73 @@ export function createApp() {
 
   app.use(cors());
   app.use(express.json());
+  app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
 
-  app.get("/health", (_req, res) => {
-    res.json({
-      ok: true,
-      service: "NovaSupport backend",
-      network: "Stellar Testnet"
-    });
+  // ── Health check with database connectivity ────────────────────────────
+
+  app.get("/health", async (_req, res) => {
+    try {
+      await prisma.$queryRaw`SELECT 1`;
+      res.json({
+        ok: true,
+        service: "NovaSupport backend",
+        network: "Stellar Testnet",
+        database: "connected",
+      });
+    } catch {
+      res.status(503).json({
+        ok: false,
+        service: "NovaSupport backend",
+        database: "unreachable",
+      });
+    }
   });
+
+  // ── List profiles with pagination ──────────────────────────────────────
+
+  app.get("/profiles", async (req, res) => {
+    try {
+      const limit = Math.min(parseInt(req.query.limit as string) || 20, 50);
+      const offset = parseInt(req.query.offset as string) || 0;
+
+      const [profiles, total] = await Promise.all([
+        prisma.profile.findMany({
+          take: limit,
+          skip: offset,
+          orderBy: { createdAt: "desc" },
+          include: { acceptedAssets: true },
+        }),
+        prisma.profile.count(),
+      ]);
+
+      res.json({ profiles, total, limit, offset });
+    } catch {
+      return sendError(res, 500, "Internal server error");
+    }
+  });
+
+  // ── Get profile by username ────────────────────────────────────────────
 
   app.get("/profiles/:username", async (req, res) => {
-    const profile = await prisma.profile.findUnique({
-      where: { username: req.params.username },
-      include: {
-        acceptedAssets: true
+    try {
+      const profile = await prisma.profile.findUnique({
+        where: { username: req.params.username },
+        include: {
+          acceptedAssets: true,
+        },
+      });
+
+      if (!profile) {
+        return sendError(res, 404, "Profile not found");
       }
-    });
 
-    if (!profile) {
-      res.status(404).json({ error: "Profile not found" });
-      return;
+      res.json(profile);
+    } catch {
+      return sendError(res, 500, "Internal server error");
     }
-
-    res.json(profile);
   });
+
+  // ── Create profile ────────────────────────────────────────────────────
 
   const createProfileSchema = z.object({
     username: z.string().min(3).max(32).regex(/^[a-z0-9-]+$/),
@@ -79,6 +123,8 @@ export function createApp() {
     }
   });
 
+  // ── Support transactions ───────────────────────────────────────────────
+
   const supportPayloadSchema = z.object({
     txHash: z.string().min(3),
     amount: z.string().min(1),
@@ -90,7 +136,7 @@ export function createApp() {
     supporterAddress: z.string().optional().nullable(),
     recipientAddress: z.string().min(1),
     profileId: z.string().min(1),
-    supporterId: z.string().optional().nullable()
+    supporterId: z.string().optional().nullable(),
   });
 
   app.get("/profiles/:username/transactions", async (req, res) => {
@@ -100,7 +146,7 @@ export function createApp() {
     const network = req.query.network as string | undefined;
 
     const profile = await prisma.profile.findUnique({
-      where: { username }
+      where: { username },
     });
 
     if (!profile) {
@@ -110,7 +156,7 @@ export function createApp() {
 
     const where = {
       recipientAddress: profile.walletAddress,
-      ...(network ? { stellarNetwork: network } : {})
+      ...(network ? { stellarNetwork: network } : {}),
     };
 
     const [transactions, total] = await Promise.all([
@@ -118,9 +164,9 @@ export function createApp() {
         where,
         take: limit,
         skip: offset,
-        orderBy: { createdAt: "desc" }
+        orderBy: { createdAt: "desc" },
       }),
-      prisma.supportTransaction.count({ where })
+      prisma.supportTransaction.count({ where }),
     ]);
 
     res.json({ transactions, total, limit, offset });
@@ -135,7 +181,7 @@ export function createApp() {
     }
 
     const supportRecord = await prisma.supportTransaction.create({
-      data: parsed.data
+      data: parsed.data,
     });
 
     res.status(201).json(supportRecord);
