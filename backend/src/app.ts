@@ -41,8 +41,12 @@ export function createApp() {
     username: z.string().min(3).max(32).regex(/^[a-z0-9-]+$/),
     displayName: z.string().min(1).max(64),
     bio: z.string().max(280).optional().default(""),
-    walletAddress: z.string().startsWith("G").length(56),
+    walletAddress: z.string().regex(/^G[A-Z0-9]{55}$/),
     ownerId: z.string().min(1),
+    email: z.string().email().optional(),
+    websiteUrl: z.string().url().startsWith("https://").optional(),
+    twitterHandle: z.string().max(15).regex(/^[a-zA-Z0-9_]+$/).optional(),
+    githubHandle: z.string().max(39).regex(/^[a-zA-Z0-9-]+$/).optional(),
     acceptedAssets: z.array(z.object({
       code: z.string().min(1).max(12),
       issuer: z.string().optional(),
@@ -56,7 +60,18 @@ export function createApp() {
       return sendError(res, 400, "Invalid request body");
     }
 
-    const { username, displayName, bio, walletAddress, ownerId, acceptedAssets } = parsed.data;
+    const { 
+      username, 
+      displayName, 
+      bio, 
+      walletAddress, 
+      ownerId, 
+      acceptedAssets,
+      email,
+      websiteUrl,
+      twitterHandle,
+      githubHandle
+    } = parsed.data;
 
     try {
       const profile = await prisma.profile.create({
@@ -66,14 +81,19 @@ export function createApp() {
           bio,
           walletAddress,
           ownerId,
+          email,
+          websiteUrl,
+          twitterHandle,
+          githubHandle,
           acceptedAssets: { create: acceptedAssets },
         },
         include: { acceptedAssets: true },
       });
       return res.status(201).json(profile);
-    } catch (e: unknown) {
+    } catch (e: any) {
       if (e && typeof e === "object" && "code" in e && e.code === "P2002") {
-        return sendError(res, 409, "Username already taken", "USERNAME_TAKEN");
+        const field = e.meta?.target?.includes("email") ? "Email" : "Username";
+        return sendError(res, 409, `${field} already taken`, `${field.toUpperCase()}_TAKEN`);
       }
       return sendError(res, 500, "Internal server error");
     }
