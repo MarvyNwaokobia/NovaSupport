@@ -11,7 +11,20 @@ function sendError(res: Response, status: number, message: string, code?: string
 export function createApp() {
   const app = express();
 
-  app.use(cors());
+  const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? "http://localhost:3000")
+    .split(",")
+    .map(o => o.trim());
+
+  app.use(cors({
+    origin: (origin, callback) => {
+      // Allow requests with no origin (curl, Postman, server-to-server)
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
+  }));
   app.use(express.json());
 
   app.get("/health", (_req, res) => {
