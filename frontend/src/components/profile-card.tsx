@@ -11,6 +11,10 @@ type ProfileCardProps = {
   bio: string;
   walletAddress: string;
   acceptedAssets: Asset[];
+  email?: string;
+  websiteUrl?: string;
+  twitterHandle?: string;
+  githubHandle?: string;
 };
 
 export function ProfileCard({
@@ -18,9 +22,14 @@ export function ProfileCard({
   displayName,
   bio,
   walletAddress,
-  acceptedAssets
+  acceptedAssets,
+  email,
+  websiteUrl,
+  twitterHandle,
+  githubHandle,
 }: ProfileCardProps) {
   const isValid = isValidStellarAddress(walletAddress);
+  const hasSocialLinks = email || websiteUrl || twitterHandle || githubHandle;
 
   return (
     <article className="rounded-[2rem] border border-white/10 bg-white/[0.04] p-7 shadow-xl shadow-black/15">
@@ -29,6 +38,44 @@ export function ProfileCard({
           <p className="text-xs uppercase tracking-[0.3em] text-mint">@{username}</p>
           <h1 className="mt-3 text-3xl font-semibold text-white">{displayName}</h1>
           <p className="mt-4 max-w-2xl text-base leading-7 text-sky/80">{bio}</p>
+
+          {hasSocialLinks && (
+            <div className="mt-4 flex flex-wrap gap-3">
+              {websiteUrl && (
+                <a
+                  href={websiteUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-xs text-sky/70 hover:text-mint transition"
+                >
+                  🌐 Website
+                </a>
+              )}
+              {twitterHandle && (
+                <a
+                  href={`https://twitter.com/${twitterHandle}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-xs text-sky/70 hover:text-mint transition"
+                >
+                  𝕏 @{twitterHandle}
+                </a>
+              )}
+              {githubHandle && (
+                <a
+                  href={`https://github.com/${githubHandle}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-xs text-sky/70 hover:text-mint transition"
+                >
+                  GitHub
+                </a>
+              )}
+              {email && (
+                <span className="text-xs text-sky/50">{email}</span>
+              )}
+            </div>
+          )}
         </div>
         <div className="rounded-3xl border border-mint/20 bg-ink/50 px-4 py-3 text-sm text-sky/80">
           <p className="font-semibold text-white">Stellar Wallet</p>
@@ -56,4 +103,3 @@ export function ProfileCard({
     </article>
   );
 }
-
