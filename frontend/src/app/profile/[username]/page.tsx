@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
 import { ProfileCard } from "@/components/profile-card";
 import { SupportPanel } from "@/components/support-panel";
+import { ProfileTabs } from "@/components/profile-tabs";
 import { API_BASE_URL } from "@/lib/config";
 
 type PageProps = {
@@ -28,8 +29,9 @@ type SupportTx = {
 };
 
 async function getProfile(username: string): Promise<Profile> {
+  // Use a cache-busting or lower revalidation for profile page
   const res = await fetch(`${API_BASE_URL}/profiles/${username}`, {
-    next: { revalidate: 60 }
+    next: { revalidate: 10 }
   });
 
   if (res.status === 404) {
@@ -63,51 +65,47 @@ export default async function ProfilePage({ params }: PageProps) {
 
   return (
     <AppShell>
-      <div className="space-y-8">
-        <ProfileCard
-          username={profile.username}
-          displayName={profile.displayName}
-          bio={profile.bio}
-          walletAddress={profile.walletAddress}
-          acceptedAssets={profile.acceptedAssets}
-        />
-        <SupportPanel walletAddress={profile.walletAddress} />
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_380px] gap-8 items-start">
+        <div className="space-y-12">
+          <ProfileCard
+            username={profile.username}
+            displayName={profile.displayName}
+            bio={profile.bio}
+            walletAddress={profile.walletAddress}
+            acceptedAssets={profile.acceptedAssets}
+          />
+          
+          <div className="px-2">
+            <ProfileTabs username={profile.username} />
+          </div>
+        </div>
 
-        {/* Support History Section */}
-        <section className="rounded-2xl border border-white/10 bg-white/[0.02] p-6">
-          <h2 className="text-lg font-semibold text-white">Support History</h2>
-          {transactions.length === 0 ? (
-            <p className="mt-3 text-sm text-sky/70">No support transactions yet. Be the first!</p>
-          ) : (
-            <div className="mt-4 space-y-3">
-              {transactions.map((tx) => (
-                <div key={tx.txHash} className="flex items-center justify-between gap-4 rounded-lg border border-white/6 p-3">
-                  <div className="flex-1">
-                    <div className="text-sm text-white font-medium">{tx.amount} {tx.assetCode}</div>
-                    {tx.message && (
-                      <div className="text-xs text-sky/60 mt-1">
-                        &quot;{tx.message}&quot;
-                      </div>
-                    )}
-                    <div className="text-[11px] text-steel/60 mt-1">{new Date(tx.createdAt).toLocaleDateString()}</div>
-                  </div>
-                  <div className="shrink-0">
-                    <a
-                      className="text-xs text-mint underline"
-                      href={`https://stellar.expert/explorer/testnet/tx/${tx.txHash}`}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      {tx.txHash.slice(0, 8)}...{tx.txHash.slice(-8)}
-                    </a>
-                  </div>
-                </div>
-              ))}
+        <aside className="sticky top-24">
+          <SupportPanel walletAddress={profile.walletAddress} />
+          
+          <div className="mt-6 rounded-3xl border border-white/5 bg-white/[0.02] p-6">
+            <h4 className="text-[10px] uppercase tracking-[0.25em] text-steel font-bold mb-4">
+              Campaign Stats
+            </h4>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-sky/60">Total Raised</span>
+                <span className="text-sm font-bold text-white">12.4k XLM</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-sky/60">Supporters</span>
+                <span className="text-sm font-bold text-white">142</span>
+              </div>
+              <div className="w-full bg-white/5 h-1.5 rounded-full overflow-hidden mt-2">
+                <div className="bg-mint h-full w-[65%]" />
+              </div>
+              <p className="text-[10px] text-steel text-center italic">
+                65% of monthly goal reached
+              </p>
             </div>
-          )}
-        </section>
+          </div>
+        </aside>
       </div>
     </AppShell>
   );
 }
-
