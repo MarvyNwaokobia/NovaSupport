@@ -9,14 +9,14 @@ import {
   TransactionBuilder
 } from "@stellar/stellar-sdk";
 
+import { HORIZON_URL, STELLAR_NETWORK, NETWORK_PASSPHRASE } from "./config";
+
 export const stellarConfig = {
-  horizonUrl:
-    process.env.NEXT_PUBLIC_HORIZON_URL ?? "https://horizon-testnet.stellar.org",
-  stellarNetwork: process.env.NEXT_PUBLIC_STELLAR_NETWORK ?? "TESTNET",
-  networkPassphrase:
-    process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE ??
-    "Test SDF Network ; September 2015"
+  horizonUrl: HORIZON_URL,
+  stellarNetwork: STELLAR_NETWORK,
+  networkPassphrase: NETWORK_PASSPHRASE
 };
+
 
 export const horizonServer = new Horizon.Server(stellarConfig.horizonUrl);
 

@@ -2,9 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { API_BASE_URL } from "@/lib/config";
 import { AppShell } from "@/components/app-shell";
-
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
 
 interface FormData {
   username: string;
@@ -12,10 +11,10 @@ interface FormData {
   bio: string;
   walletAddress: string;
   acceptedAssets: string[];
-  twitter?: string;
-  github?: string;
-  website?: string;
-  email?: string;
+  twitterHandle: string;
+  githubHandle: string;
+  websiteUrl: string;
+  email: string;
 }
 
 const CONSTRAINTS = [
@@ -39,9 +38,9 @@ export default function CreatePage() {
     bio: "",
     walletAddress: "",
     acceptedAssets: ["XLM", "USDC"],
-    twitter: "",
-    github: "",
-    website: "",
+    twitterHandle: "",
+    githubHandle: "",
+    websiteUrl: "",
     email: "",
   });
 
@@ -60,6 +59,22 @@ export default function CreatePage() {
   const walletValid =
     form.walletAddress === "" ||
     /^G[A-Z0-9]{55}$/.test(form.walletAddress);
+
+  const twitterInvalid =
+    form.twitterHandle !== "" &&
+    !/^[a-zA-Z0-9_]+$/.test(form.twitterHandle);
+
+  const githubInvalid =
+    form.githubHandle !== "" &&
+    !/^[a-zA-Z0-9\-]+$/.test(form.githubHandle);
+
+  const websiteValid =
+    form.websiteUrl === "" ||
+    /^https:\/\/.+/.test(form.websiteUrl);
+
+  const emailValid =
+    form.email === "" ||
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email);
 
   const handleNext = () => {
     if (step === 1) {
@@ -82,6 +97,13 @@ export default function CreatePage() {
         return;
       }
     }
+    if (step === 3) {
+      if (twitterInvalid || githubInvalid || !websiteValid || !emailValid) {
+        setError("Please fix the errors in your social links.");
+        return;
+      }
+    }
+
     setError(null);
     setStep((s) => s + 1);
   };
@@ -101,6 +123,11 @@ export default function CreatePage() {
 
     if (!walletValid) {
       setError("Wallet address must be a valid Stellar public key starting with G.");
+      return;
+    }
+
+    if (form.email && !emailValid) {
+      setError("Please enter a valid email address.");
       return;
     }
 
@@ -286,52 +313,82 @@ export default function CreatePage() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="flex flex-col gap-2">
                     <label className="text-[10px] uppercase tracking-[0.25em] text-steel">
-                      Twitter Handle
+                      Twitter / X
                     </label>
-                    <input
-                      type="text"
-                      placeholder="username"
-                      value={form.twitter}
-                      onChange={set("twitter" as any)}
-                      className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-steel/40 focus:border-mint/50 focus:outline-none transition"
-                    />
+                    <div className="relative">
+                      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-steel/60 text-sm select-none">
+                        @
+                      </span>
+                      <input
+                        type="text"
+                        maxLength={15}
+                        placeholder="handle"
+                        value={form.twitterHandle}
+                        onChange={set("twitterHandle")}
+                        className="w-full rounded-2xl border border-white/10 bg-white/5 pl-8 pr-4 py-3 text-sm text-white placeholder:text-steel/40 focus:border-mint/50 focus:outline-none focus:ring-1 focus:ring-mint/20 transition"
+                      />
+                    </div>
+                    {twitterInvalid && (
+                      <p className="text-[10px] text-red-400 pl-1">
+                        Letters, numbers, underscores only
+                      </p>
+                    )}
                   </div>
+
                   <div className="flex flex-col gap-2">
                     <label className="text-[10px] uppercase tracking-[0.25em] text-steel">
-                      GitHub Username
+                      GitHub
                     </label>
                     <input
                       type="text"
+                      maxLength={39}
                       placeholder="username"
-                      value={form.github}
-                      onChange={set("github" as any)}
-                      className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-steel/40 focus:border-mint/50 focus:outline-none transition"
+                      value={form.githubHandle}
+                      onChange={set("githubHandle")}
+                      className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-steel/40 focus:border-mint/50 focus:outline-none focus:ring-1 focus:ring-mint/20 transition"
                     />
+                    {githubInvalid && (
+                      <p className="text-[10px] text-red-400 pl-1">
+                        Letters, numbers, hyphens only
+                      </p>
+                    )}
                   </div>
                 </div>
+
                 <div className="flex flex-col gap-2">
                   <label className="text-[10px] uppercase tracking-[0.25em] text-steel">
-                    Personal Website
+                    Website
                   </label>
                   <input
                     type="url"
-                    placeholder="https://yourwebsite.com"
-                    value={form.website}
-                    onChange={set("website" as any)}
-                    className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-steel/40 focus:border-mint/50 focus:outline-none transition"
+                    placeholder="https://yoursite.com"
+                    value={form.websiteUrl}
+                    onChange={set("websiteUrl")}
+                    className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-steel/40 focus:border-mint/50 focus:outline-none focus:ring-1 focus:ring-mint/20 transition"
                   />
+                  {form.websiteUrl && !websiteValid && (
+                    <p className="text-[10px] text-red-400 pl-1">
+                      URL must start with https://
+                    </p>
+                  )}
                 </div>
+
                 <div className="flex flex-col gap-2">
                   <label className="text-[10px] uppercase tracking-[0.25em] text-steel">
                     Email (Private)
                   </label>
                   <input
                     type="email"
-                    placeholder="admin@example.com"
+                    placeholder="you@example.com"
                     value={form.email}
-                    onChange={set("email" as any)}
-                    className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-steel/40 focus:border-mint/50 focus:outline-none transition"
+                    onChange={set("email")}
+                    className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-steel/40 focus:border-mint/50 focus:outline-none focus:ring-1 focus:ring-mint/20 transition"
                   />
+                  {form.email && !emailValid && (
+                    <p className="text-[10px] text-red-400 pl-1">
+                      Enter a valid email address
+                    </p>
+                  )}
                 </div>
               </div>
             )}
@@ -354,7 +411,7 @@ export default function CreatePage() {
               )}
               <button
                 type="button"
-                onClick={step === 3 ? handleSubmit : handleNext}
+                onClick={handleSubmit}
                 disabled={loading}
                 className="flex-[2] rounded-full bg-mint px-5 py-4 text-sm font-semibold text-ink transition hover:bg-white active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
               >
