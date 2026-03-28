@@ -7,7 +7,11 @@ function truncateAddress(address: string) {
   return `${address.slice(0, 6)}...${address.slice(-6)}`;
 }
 
-export function WalletConnect() {
+type WalletConnectProps = {
+  onConnect?: (address: string) => void;
+};
+
+export function WalletConnect({ onConnect }: WalletConnectProps = {}) {
   const [address, setAddress] = useState<string | null>(null);
   const [status, setStatus] = useState("Connect Freighter to preview Stellar Testnet support.");
   const [errorType, setErrorType] = useState<"not_installed" | "denied" | "wrong_network" | null>(null);
@@ -46,6 +50,7 @@ export function WalletConnect() {
 
       setAddress(result.address);
       setStatus("Freighter connected on Stellar Testnet.");
+      onConnect?.(result.address);
     } catch (error) {
       setStatus(
         error instanceof Error
