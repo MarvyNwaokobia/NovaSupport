@@ -84,7 +84,11 @@ export default async function ProfilePage({ params }: PageProps) {
                 <div key={tx.txHash} className="flex items-center justify-between gap-4 rounded-lg border border-white/6 p-3">
                   <div className="flex-1">
                     <div className="text-sm text-white font-medium">{tx.amount} {tx.assetCode}</div>
-                    {tx.message && <div className="text-xs text-sky/60 mt-1">"{tx.message}"</div>}
+                    {tx.message && (
+                      <div className="text-xs text-sky/60 mt-1">
+                        &quot;{tx.message}&quot;
+                      </div>
+                    )}
                     <div className="text-[11px] text-steel/60 mt-1">{new Date(tx.createdAt).toLocaleDateString()}</div>
                   </div>
                   <div className="shrink-0">
