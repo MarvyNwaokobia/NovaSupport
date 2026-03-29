@@ -1,10 +1,12 @@
 import cors from "cors";
 import express, { Response } from "express";
 import { rateLimit } from "express-rate-limit";
-import morgan from "morgan";
+import { pinoHttp } from "pino-http";
+import type { Logger } from "pino";
 import { z } from "zod";
 import { StrKey } from "@stellar/stellar-sdk";
 import { prisma } from "./db.js";
+import { logger } from "./logger.js";
 
 function createRateLimiters() {
   const globalLimiter = rateLimit({
@@ -30,7 +32,7 @@ function sendError(res: Response, status: number, message: string, code?: string
   return res.status(status).json({ error: message, ...(code ? { code } : {}) });
 }
 
-export function createApp() {
+export function createApp(customLogger?: Logger) {
   const app = express();
   const { globalLimiter, writeLimiter } = createRateLimiters();
 
@@ -49,12 +51,12 @@ export function createApp() {
     },
   }));
   app.use(express.json());
-  app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
+  app.use(pinoHttp({ logger: customLogger ?? logger }));
   app.use(globalLimiter);
 
   // ── Health check with database connectivity ────────────────────────────
 
-  app.get("/health", async (_req, res) => {
+  app.get("/health", async (req, res) => {
     try {
       await prisma.$queryRaw`SELECT 1`;
       res.json({
@@ -63,7 +65,8 @@ export function createApp() {
         network: "Stellar Testnet",
         database: "connected",
       });
-    } catch {
+    } catch (e: unknown) {
+      req.log.error({ err: e }, "health check database error");
       res.status(503).json({
         ok: false,
         service: "NovaSupport backend",
@@ -90,7 +93,8 @@ export function createApp() {
       ]);
 
       res.json({ profiles, total, limit, offset });
-    } catch {
+    } catch (e: unknown) {
+      req.log.error({ err: e }, "database error listing profiles");
       return sendError(res, 500, "Internal server error");
     }
   });
@@ -111,7 +115,8 @@ export function createApp() {
       }
 
       res.json(profile);
-    } catch {
+    } catch (e: unknown) {
+      req.log.error({ err: e }, "database error fetching profile");
       return sendError(res, 500, "Internal server error");
     }
   });
@@ -141,6 +146,7 @@ export function createApp() {
     const parsed = createProfileSchema.safeParse(req.body);
 
     if (!parsed.success) {
+      req.log.warn({ issues: parsed.error.flatten() }, "validation failed");
       return sendError(res, 400, "Invalid request body");
     }
 
@@ -162,12 +168,15 @@ export function createApp() {
         },
         include: { acceptedAssets: true },
       });
+      req.log.info({ username: profile.username }, "profile created");
       return res.status(201).json(profile);
-    } catch (e: any) {
-      if (e && typeof e === "object" && "code" in e && e.code === "P2002") {
-        const field = e.meta?.target?.includes("email") ? "Email" : "Username";
+    } catch (e: unknown) {
+      if (e && typeof e === "object" && "code" in e && (e as { code: string }).code === "P2002") {
+        const meta = (e as { meta?: { target?: string[] } }).meta;
+        const field = meta?.target?.includes("email") ? "Email" : "Username";
         return sendError(res, 409, `${field} already taken`, `${field.toUpperCase()}_TAKEN`);
       }
+      req.log.error({ err: e }, "database error creating profile");
       return sendError(res, 500, "Internal server error");
     }
   });
@@ -188,11 +197,13 @@ export function createApp() {
     const parsed = updateProfileSchema.safeParse(req.body);
 
     if (!parsed.success) {
+      req.log.warn({ issues: parsed.error.flatten() }, "validation failed");
       return sendError(res, 400, "Invalid request body");
     }
 
+    const username = req.params.username as string;
     const profile = await prisma.profile.findUnique({
-      where: { username: req.params.username },
+      where: { username },
     });
 
     if (!profile) {
@@ -201,7 +212,7 @@ export function createApp() {
 
     try {
       const updated = await prisma.profile.update({
-        where: { username: req.params.username },
+        where: { username },
         data: parsed.data,
         include: { acceptedAssets: true },
       });
@@ -210,6 +221,7 @@ export function createApp() {
       if (e && typeof e === "object" && "code" in e && e.code === "P2002") {
         return sendError(res, 409, "Email already in use", "EMAIL_TAKEN");
       }
+      req.log.error({ err: e }, "database error updating profile");
       return sendError(res, 500, "Internal server error");
     }
   });
@@ -266,13 +278,15 @@ export function createApp() {
     const parsed = supportPayloadSchema.safeParse(req.body);
 
     if (!parsed.success) {
-      return res.status(400).json({ error: parsed.error.flatten() });
+      req.log.warn({ issues: parsed.error.flatten() }, "validation failed");
+      return sendError(res, 400, "Invalid request body");
     }
 
     const supportRecord = await prisma.supportTransaction.create({
       data: parsed.data,
     });
 
+    req.log.info({ txHash: supportRecord.txHash }, "support transaction recorded");
     res.status(201).json(supportRecord);
   });
 
