@@ -370,7 +370,7 @@ export function createApp(customLogger?: Logger) {
         return sendError(res, 503, "Avatar upload service unavailable");
       }
 
-      const { username } = req.params;
+      const username = req.params.username as string;
 
       const profile = await prisma.profile.findUnique({
         where: { username },
