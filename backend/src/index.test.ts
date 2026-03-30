@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import { app } from "./app.js";
 import { prisma } from "./db.js";
+import { signJWT } from "./auth.js";
 
 const baseUsername = "stellar-dev";
 const seedEmail = "builder@novasupport.dev";
@@ -12,6 +13,15 @@ let baseUrl = "";
 let profileId = "";
 let userId = "";
 let server: ReturnType<typeof app.listen>;
+let authToken = "";
+
+// Helper to get auth headers for protected endpoints
+function getAuthHeaders() {
+  return {
+    "content-type": "application/json",
+    "authorization": `Bearer ${authToken}`,
+  };
+}
 
 const validProfilePayload = {
   displayName: "Test Creator",
@@ -29,6 +39,7 @@ async function seedProfile() {
   });
 
   userId = user.id;
+  authToken = signJWT(walletAddress, user.id);
 
   const profile = await prisma.profile.upsert({
     where: { username: baseUsername },
@@ -142,9 +153,7 @@ async function main() {
     await runTest("creates a support transaction when the payload is valid", async () => {
       const response = await fetch(`${baseUrl}/support-transactions`, {
         method: "POST",
-        headers: {
-          "content-type": "application/json"
-        },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           txHash: `ci-test-${randomUUID()}`,
           amount: "5.0000000",
@@ -166,9 +175,7 @@ async function main() {
     await runTest("returns a validation error for incomplete support payloads", async () => {
       const response = await fetch(`${baseUrl}/support-transactions`, {
         method: "POST",
-        headers: {
-          "content-type": "application/json"
-        },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           txHash: "bad"
         })
@@ -188,7 +195,7 @@ async function main() {
 
       await fetch(`${baseUrl}/support-transactions`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           txHash,
           amount: "10.0000000",
@@ -255,7 +262,7 @@ async function main() {
     await runTest("PATCH updates social fields on a profile", async () => {
       const response = await fetch(`${baseUrl}/profiles/${baseUsername}`, {
         method: "PATCH",
-        headers: { "content-type": "application/json" },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           email: "updated@stellar.example",
           websiteUrl: "https://stellar.example",
@@ -276,7 +283,7 @@ async function main() {
     await runTest("PATCH clears nullable social fields when set to null", async () => {
       const response = await fetch(`${baseUrl}/profiles/${baseUsername}`, {
         method: "PATCH",
-        headers: { "content-type": "application/json" },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           email: null,
           twitterHandle: null,
@@ -293,7 +300,7 @@ async function main() {
     await runTest("PATCH rejects invalid social field formats", async () => {
       const response = await fetch(`${baseUrl}/profiles/${baseUsername}`, {
         method: "PATCH",
-        headers: { "content-type": "application/json" },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           email: "not-an-email",
         }),
@@ -305,12 +312,11 @@ async function main() {
     await runTest("POST rejects invalid Stellar address checksum", async () => {
       const response = await fetch(`${baseUrl}/profiles`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           username: "bad-wallet-test",
           displayName: "Bad Wallet",
           walletAddress: "GBADADDRESSBADADDRESSBADADDRESSBADADDRESSBADADDRESSBADX",
-          ownerId: "test-owner-id",
           acceptedAssets: [{ code: "XLM" }],
         }),
       });
@@ -321,7 +327,7 @@ async function main() {
     await runTest("PATCH returns 404 for non-existent profile", async () => {
       const response = await fetch(`${baseUrl}/profiles/nonexistent-user`, {
         method: "PATCH",
-        headers: { "content-type": "application/json" },
+        headers: getAuthHeaders(),
         body: JSON.stringify({ displayName: "New Name" }),
       });
 
@@ -331,11 +337,10 @@ async function main() {
     await runTest("POST /profiles - returns 201 with social fields when provided", async () => {
       const response = await fetch(`${baseUrl}/profiles`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           ...validProfilePayload,
           username: `social-test-${randomUUID().slice(0, 8)}`,
-          ownerId: userId,
           email: "social@example.com",
           websiteUrl: "https://example.com",
           twitterHandle: "testhandle",
@@ -356,22 +361,20 @@ async function main() {
 
       await fetch(`${baseUrl}/profiles`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           ...validProfilePayload,
           username: `first-${randomUUID().slice(0, 8)}`,
-          ownerId: userId,
           email: dupEmail,
         }),
       });
 
       const response = await fetch(`${baseUrl}/profiles`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           ...validProfilePayload,
           username: `second-${randomUUID().slice(0, 8)}`,
-          ownerId: userId,
           email: dupEmail,
         }),
       });
@@ -384,11 +387,10 @@ async function main() {
     await runTest("POST /profiles - returns 400 for invalid email format", async () => {
       const response = await fetch(`${baseUrl}/profiles`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           ...validProfilePayload,
           username: `inv-email-${randomUUID().slice(0, 8)}`,
-          ownerId: userId,
           email: "not-an-email",
         }),
       });
@@ -399,11 +401,10 @@ async function main() {
     await runTest("POST /profiles - returns 400 for websiteUrl without https", async () => {
       const response = await fetch(`${baseUrl}/profiles`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           ...validProfilePayload,
           username: `inv-url-${randomUUID().slice(0, 8)}`,
-          ownerId: userId,
           websiteUrl: "http://example.com",
         }),
       });
@@ -414,11 +415,10 @@ async function main() {
     await runTest("POST /profiles - returns 400 for twitterHandle with @ prefix", async () => {
       const response = await fetch(`${baseUrl}/profiles`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           ...validProfilePayload,
           username: `inv-twit-${randomUUID().slice(0, 8)}`,
-          ownerId: userId,
           twitterHandle: "@testhandle",
         }),
       });
@@ -445,7 +445,7 @@ async function main() {
     await runTest("POST /support-transactions includes RateLimit-Limit and RateLimit-Remaining headers", async () => {
       const response = await fetch(`${baseUrl}/support-transactions`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           txHash: `ci-test-${randomUUID()}`,
           amount: "1.0000000",

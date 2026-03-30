@@ -7,8 +7,18 @@ import { z } from "zod";
 import { StrKey } from "@stellar/stellar-sdk";
 import { prisma } from "./db.js";
 import { logger } from "./logger.js";
+import { generateChallenge, verifySignature, signJWT, requireAuth, isValidStellarAddress, type AuthContext } from "./auth.js";
 import multer from "multer";
 import { createClient } from "@supabase/supabase-js";
+
+// Extend Express Request to include auth context
+declare global {
+  namespace Express {
+    interface Request {
+      auth?: AuthContext;
+    }
+  }
+}
 
 const ALLOWED_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 const MAX_FILE_SIZE = 2_097_152;
@@ -63,6 +73,22 @@ export function createApp(customLogger?: Logger) {
   const app = express();
   const { globalLimiter, writeLimiter } = createRateLimiters();
 
+  // In-memory challenge store (stateless with signed timestamp)
+  const challenges = new Map<string, { challenge: string; timestamp: number }>();
+  const CHALLENGE_EXPIRY_MS = 5 * 60 * 1000; // 5 minutes
+
+  function cleanupExpiredChallenges() {
+    const now = Date.now();
+    for (const [key, value] of challenges.entries()) {
+      if (now - value.timestamp > CHALLENGE_EXPIRY_MS) {
+        challenges.delete(key);
+      }
+    }
+  }
+
+  // Cleanup expired challenges every minute
+  setInterval(cleanupExpiredChallenges, 60000);
+
   const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? "http://localhost:3000")
     .split(",")
     .map(o => o.trim());
@@ -100,6 +126,77 @@ export function createApp(customLogger?: Logger) {
         database: "unreachable",
       });
     }
+  });
+
+  // ── Authentication ─────────────────────────────────────────────────────
+
+  // Request a challenge nonce for wallet signature
+  app.post("/auth/challenge", (req, res) => {
+    const { walletAddress } = req.body;
+    
+    if (!walletAddress || !isValidStellarAddress(walletAddress)) {
+      return sendError(res, 400, "Invalid wallet address");
+    }
+    
+    const challenge = generateChallenge(walletAddress);
+    challenges.set(walletAddress, { challenge, timestamp: Date.now() });
+    
+    res.json({ challenge, walletAddress });
+  });
+
+  // Verify signature and return JWT
+  const verifySchema = z.object({
+    walletAddress: z.string(),
+    signature: z.string(),
+  });
+
+  app.post("/auth/verify", async (req, res) => {
+    const parsed = verifySchema.safeParse(req.body);
+    if (!parsed.success) {
+      return sendError(res, 400, "Invalid request body");
+    }
+
+    const { walletAddress, signature } = parsed.data;
+    
+    if (!isValidStellarAddress(walletAddress)) {
+      return sendError(res, 400, "Invalid wallet address");
+    }
+
+    const challengeData = challenges.get(walletAddress);
+    if (!challengeData) {
+      return sendError(res, 400, "No challenge found for this wallet");
+    }
+
+    // Check if challenge expired
+    if (Date.now() - challengeData.timestamp > CHALLENGE_EXPIRY_MS) {
+      challenges.delete(walletAddress);
+      return sendError(res, 400, "Challenge expired");
+    }
+
+    // Verify the signature
+    const isValid = verifySignature(walletAddress, challengeData.challenge, signature);
+    if (!isValid) {
+      return sendError(res, 401, "Invalid signature");
+    }
+
+    // Clear the used challenge
+    challenges.delete(walletAddress);
+
+    // Create or get user
+    let user = await prisma.user.findFirst({
+      where: { email: walletAddress },
+    });
+
+    if (!user) {
+      user = await prisma.user.create({
+        data: { email: walletAddress },
+      });
+    }
+
+    // Sign JWT
+    const token = signJWT(walletAddress, user.id);
+
+    res.json({ token, walletAddress, userId: user.id });
   });
 
   // ── List profiles with pagination ──────────────────────────────────────
@@ -162,14 +259,14 @@ export function createApp(customLogger?: Logger) {
     websiteUrl: z.string().url().startsWith("https://").optional().nullable(),
     twitterHandle: z.string().max(15).regex(/^[a-zA-Z0-9_]+$/).optional().nullable(),
     githubHandle: z.string().max(39).regex(/^[a-zA-Z0-9-]+$/).optional().nullable(),
-    ownerId: z.string().min(1),
+    // ownerId removed - now derived from JWT
     acceptedAssets: z.array(z.object({
       code: z.string().min(1).max(12),
       issuer: z.string().optional(),
     })).min(1),
   });
 
-  app.post("/profiles", writeLimiter, async (req, res) => {
+  app.post("/profiles", requireAuth, writeLimiter, async (req, res) => {
     const parsed = createProfileSchema.safeParse(req.body);
 
     if (!parsed.success) {
@@ -177,7 +274,12 @@ export function createApp(customLogger?: Logger) {
       return sendError(res, 400, "Invalid request body");
     }
 
-    const { username, displayName, bio, walletAddress, email, websiteUrl, twitterHandle, githubHandle, ownerId, acceptedAssets } = parsed.data;
+    const { username, displayName, bio, walletAddress, email, websiteUrl, twitterHandle, githubHandle, acceptedAssets } = parsed.data;
+    
+    // Verify authenticated wallet matches the profile wallet address
+    if (!req.auth || req.auth.walletAddress !== walletAddress) {
+      return sendError(res, 403, "Forbidden: Wallet address does not match authenticated user");
+    }
 
     try {
       const profile = await prisma.profile.create({
@@ -190,7 +292,7 @@ export function createApp(customLogger?: Logger) {
           websiteUrl,
           twitterHandle,
           githubHandle,
-          ownerId,
+          ownerId: req.auth.userId || req.auth.walletAddress,
           acceptedAssets: { create: acceptedAssets },
         },
         include: { acceptedAssets: true },
@@ -220,7 +322,7 @@ export function createApp(customLogger?: Logger) {
     githubHandle: z.string().max(39).regex(/^[a-zA-Z0-9-]+$/).optional().nullable(),
   });
 
-  app.patch("/profiles/:username", writeLimiter, async (req, res) => {
+  app.patch("/profiles/:username", requireAuth, writeLimiter, async (req, res) => {
     const parsed = updateProfileSchema.safeParse(req.body);
 
     if (!parsed.success) {
@@ -235,6 +337,11 @@ export function createApp(customLogger?: Logger) {
 
     if (!profile) {
       return sendError(res, 404, "Profile not found");
+    }
+
+    // Verify authenticated wallet owns the profile
+    if (!req.auth || req.auth.walletAddress !== profile.walletAddress) {
+      return sendError(res, 403, "Forbidden: You do not own this profile");
     }
 
     try {
@@ -301,7 +408,7 @@ export function createApp(customLogger?: Logger) {
     res.json({ transactions, total, limit, offset });
   });
 
-  app.post("/support-transactions", writeLimiter, async (req, res) => {
+  app.post("/support-transactions", requireAuth, writeLimiter, async (req, res) => {
     const parsed = supportPayloadSchema.safeParse(req.body);
 
     if (!parsed.success) {
