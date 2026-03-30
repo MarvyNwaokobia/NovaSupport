@@ -17,6 +17,7 @@ type SupportPanelProps = {
 export function SupportPanel({ walletAddress, acceptedAssets }: SupportPanelProps) {
   const [visitorAddress, setVisitorAddress] = useState<string | null>(null);
   const [amount, setAmount] = useState("");
+  const networkLabel = getNetworkLabel();
 
   const selectedAsset = acceptedAssets[0];
   const amountNum = parseFloat(amount);
@@ -26,6 +27,11 @@ export function SupportPanel({ walletAddress, acceptedAssets }: SupportPanelProp
   if (!visitorAddress) {
     return (
       <section className="rounded-[2rem] border border-gold/25 bg-gold/10 p-7 text-center">
+        <div className="mb-4">
+          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800">
+            {networkLabel}
+          </span>
+        </div>
         <p className="mb-4 text-sm text-sky/85">
           Connect your Freighter wallet to support this creator.
         </p>
@@ -36,11 +42,16 @@ export function SupportPanel({ walletAddress, acceptedAssets }: SupportPanelProp
 
   return (
     <section className="rounded-[2rem] border border-gold/25 bg-gold/10 p-7">
+      <div className="mb-4">
+        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800">
+          {networkLabel}
+        </span>
+      </div>
       <p className="text-xs uppercase tracking-[0.25em] text-gold">Support intent</p>
       <h2 className="mt-3 text-2xl font-semibold text-white">Ready for a real Stellar flow</h2>
       <p className="mt-4 max-w-2xl text-sm leading-7 text-sky/85">
         This MVP intentionally stops at wallet connection and transaction preparation.
-        The next implementation step is to build and sign a Testnet payment to the
+        The next implementation step is to build and sign a {networkLabel} payment to the
         recipient address below, then store the resulting hash through the backend.
       </p>
       <div className="mt-6 grid gap-4 sm:grid-cols-3">
