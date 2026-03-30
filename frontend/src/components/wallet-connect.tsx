@@ -1,11 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { getAddress, isAllowed, setAllowed } from "@stellar/freighter-api";
 
 function truncateAddress(address: string) {
   return `${address.slice(0, 6)}...${address.slice(-6)}`;
 }
+
+const STORAGE_KEY = "walletAddress";
 
 type WalletConnectProps = {
   onConnect?: (address: string) => void;
@@ -15,6 +17,39 @@ export function WalletConnect({ onConnect }: WalletConnectProps = {}) {
   const [address, setAddress] = useState<string | null>(null);
   const [status, setStatus] = useState("Connect Freighter to preview Stellar Testnet support.");
   const [errorType, setErrorType] = useState<"not_installed" | "denied" | "wrong_network" | null>(null);
+
+  // Restore from localStorage on mount and verify against Freighter
+  useEffect(() => {
+    const restoreWallet = async () => {
+      if (typeof window === "undefined") return;
+
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (!saved) return;
+
+      try {
+        // Check if Freighter is available and allowed
+        const access = await isAllowed();
+        if (!access.isAllowed) return;
+
+        const result = await getAddress();
+        if (result.error || !result.address) return;
+
+        // If Freighter returns a different address, update to the new one
+        if (result.address !== saved) {
+          localStorage.setItem(STORAGE_KEY, result.address);
+        }
+
+        setAddress(result.address);
+        setStatus("Freighter connected on Stellar Testnet.");
+        onConnect?.(result.address);
+      } catch {
+        // Silent fail - user will need to reconnect manually
+        localStorage.removeItem(STORAGE_KEY);
+      }
+    };
+
+    restoreWallet();
+  }, [onConnect]);
 
   async function connectWallet() {
     setErrorType(null);
@@ -48,6 +83,11 @@ export function WalletConnect({ onConnect }: WalletConnectProps = {}) {
         return;
       }
 
+      // Save to localStorage on successful connection
+      if (typeof window !== "undefined") {
+        localStorage.setItem(STORAGE_KEY, result.address);
+      }
+
       setAddress(result.address);
       setStatus("Freighter connected on Stellar Testnet.");
       onConnect?.(result.address);
@@ -58,6 +98,15 @@ export function WalletConnect({ onConnect }: WalletConnectProps = {}) {
           : "Unable to connect to Freighter."
       );
     }
+  }
+
+  function disconnectWallet() {
+    if (typeof window !== "undefined") {
+      localStorage.removeItem(STORAGE_KEY);
+    }
+    setAddress(null);
+    setStatus("Connect Freighter to preview Stellar Testnet support.");
+    setErrorType(null);
   }
 
   return (
@@ -98,10 +147,10 @@ export function WalletConnect({ onConnect }: WalletConnectProps = {}) {
         </div>
         <button
           type="button"
-          onClick={connectWallet}
+          onClick={address ? disconnectWallet : connectWallet}
           className="rounded-full bg-mint px-4 py-2 text-sm font-semibold text-ink transition hover:bg-white"
         >
-          {address ? "Reconnect" : "Connect Freighter"}
+          {address ? "Disconnect" : "Connect Freighter"}
         </button>
       </div>
       {address ? (
@@ -112,4 +161,3 @@ export function WalletConnect({ onConnect }: WalletConnectProps = {}) {
     </div>
   );
 }
-
