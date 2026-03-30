@@ -1,6 +1,27 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { ProfileCard } from '@/components/profile-card';
+
+// Mock @/lib/config
+vi.mock('@/lib/config', () => ({
+  HORIZON_URL: 'https://horizon-testnet.stellar.org',
+  API_BASE_URL: 'http://localhost:4000',
+  STELLAR_NETWORK: 'TESTNET',
+  NETWORK_PASSPHRASE: 'Test SDF Network ; September 2015',
+  CONTRACT_ID: '',
+  SOROBAN_RPC_URL: 'https://soroban-testnet.stellar.org',
+}));
+
+// Mock @/lib/stellar
+vi.mock('@/lib/stellar', () => ({
+  getNetworkLabel: vi.fn(() => 'Testnet'),
+  isValidStellarAddress: vi.fn(() => true),
+  stellarConfig: {
+    horizonUrl: 'https://horizon-testnet.stellar.org',
+    stellarNetwork: 'TESTNET',
+    networkPassphrase: 'Test SDF Network ; September 2015',
+  },
+}));
 
 describe('ProfileCard', () => {
   const mockProfile = {

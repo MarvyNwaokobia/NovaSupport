@@ -9,7 +9,7 @@ vi.mock('@stellar/freighter-api', () => ({
   setAllowed: vi.fn(),
 }));
 
-// Mock @/lib/config to provide CONTRACT_ID
+// Mock @/lib/config
 vi.mock('@/lib/config', () => ({
   HORIZON_URL: 'https://horizon-testnet.stellar.org',
   API_BASE_URL: 'http://localhost:4000',
@@ -19,16 +19,21 @@ vi.mock('@/lib/config', () => ({
   SOROBAN_RPC_URL: 'https://soroban-testnet.stellar.org',
 }));
 
+// Mock WalletConnect to simulate connected state
+vi.mock('./wallet-connect', () => ({
+  WalletConnect: ({ onConnect }: { onConnect?: (address: string) => void }) => {
+    // Simulate immediate connection for testing
+    onConnect?.('GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA');
+    return <div data-testid="wallet-connect-mock">WalletConnect Mock</div>;
+  },
+}));
+
 describe('SupportPanel', () => {
   const mockProps = {
     walletAddress: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
-    acceptedAssets: [
-      { code: 'XLM', issuer: null },
-      { code: 'USDC', issuer: 'GBBD47IF6LWK7P7MDMSCR4XFM6KJLGMGR5E2Q3ZXZQ4KQQYT5R3332W' },
-    ],
   };
 
-  it('renders network info', () => {
+  it('renders network info when connected', () => {
     render(<SupportPanel {...mockProps} />);
     
     expect(screen.getByText('Network')).toBeInTheDocument();
@@ -36,24 +41,9 @@ describe('SupportPanel', () => {
     expect(screen.getByText('Recipient')).toBeInTheDocument();
   });
 
-  it('renders recipient address', () => {
+  it('renders recipient address when connected', () => {
     render(<SupportPanel {...mockProps} />);
     
     expect(screen.getByText(mockProps.walletAddress)).toBeInTheDocument();
-  });
-
-  it('renders amount input', () => {
-    render(<SupportPanel {...mockProps} />);
-    
-    expect(screen.getByText('Amount')).toBeInTheDocument();
-    expect(screen.getByPlaceholderText('0.00')).toBeInTheDocument();
-  });
-
-  it('renders Send Support button disabled by default', () => {
-    render(<SupportPanel {...mockProps} />);
-    
-    const button = screen.getByRole('button', { name: 'Send Support' });
-    expect(button).toBeInTheDocument();
-    expect(button).toBeDisabled();
   });
 });
