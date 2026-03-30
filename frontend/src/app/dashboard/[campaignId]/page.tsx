@@ -24,9 +24,100 @@ interface AnalyticsData {
   };
   dailyContributions: { date: string; amount: number }[];
   assetBreakdown: { name: string; value: number }[];
+  recentTransactions: {
+    id: string;
+    type: string;
+    user: string;
+    asset: string;
+    amount: string;
+    age: string;
+  }[];
 }
 
 const COLORS = ["#00FFC2", "#00E0FF", "#FFB800", "#FF4D4D", "#9D4EDD"];
+
+function toNumber(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
+}
+
+function toString(value: unknown, fallback = ""): string {
+  return typeof value === "string" ? value : fallback;
+}
+
+function timeAgo(value: string): string {
+  const timestamp = new Date(value).getTime();
+  if (Number.isNaN(timestamp)) return "-";
+
+  const diffMs = Date.now() - timestamp;
+  const diffMinutes = Math.floor(diffMs / 60000);
+  if (diffMinutes < 1) return "just now";
+  if (diffMinutes < 60) return `${diffMinutes}m ago`;
+
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+
+  const diffDays = Math.floor(diffHours / 24);
+  return `${diffDays}d ago`;
+}
+
+function normalizeAnalyticsResponse(json: unknown): AnalyticsData {
+  const payload = (json ?? {}) as Record<string, unknown>;
+  const summary = (payload.summary ?? {}) as Record<string, unknown>;
+
+  const dailySource = (payload.dailyContributions ?? payload.daily_contributions ?? []) as unknown[];
+  const assetSource = (payload.assetBreakdown ?? payload.asset_breakdown ?? []) as unknown[];
+  const txSource = (payload.recentTransactions ?? payload.recent_transactions ?? payload.transactions ?? []) as unknown[];
+
+  return {
+    summary: {
+      totalRaised: toNumber(summary.totalRaised ?? summary.total_raised ?? payload.totalRaised ?? payload.total_raised),
+      totalContributors: toNumber(
+        summary.totalContributors ?? summary.total_contributors ?? payload.totalContributors ?? payload.total_contributors
+      ),
+      avgContribution: toNumber(
+        summary.avgContribution ?? summary.avg_contribution ?? payload.avgContribution ?? payload.avg_contribution
+      ),
+      activeDrips: toNumber(summary.activeDrips ?? summary.active_drips ?? payload.activeDrips ?? payload.active_drips),
+    },
+    dailyContributions: dailySource.map((entry, index) => {
+      const item = entry as Record<string, unknown>;
+      return {
+        date: toString(item.date, `Day ${index + 1}`),
+        amount: toNumber(item.amount ?? item.totalAmount ?? item.total_amount),
+      };
+    }),
+    assetBreakdown: assetSource.map((entry) => {
+      const item = entry as Record<string, unknown>;
+      return {
+        name: toString(item.name ?? item.assetCode ?? item.asset_code, "Unknown"),
+        value: toNumber(item.value ?? item.amount ?? item.totalAmount ?? item.total_amount),
+      };
+    }),
+    recentTransactions: txSource.map((entry, index) => {
+      const item = entry as Record<string, unknown>;
+      const txType = toString(item.type ?? item.supportType ?? item.support_type, "One-time");
+      const supporter = toString(
+        item.user ?? item.supporter ?? item.supporterAddress ?? item.supporter_address,
+        "Unknown"
+      );
+      const amountValue = toNumber(item.amount ?? item.totalAmount ?? item.total_amount);
+      const createdAt = toString(item.createdAt ?? item.created_at, "");
+      return {
+        id: toString(item.id ?? item.txHash ?? item.tx_hash, `tx-${index}`),
+        type: txType,
+        user: supporter,
+        asset: toString(item.asset ?? item.assetCode ?? item.asset_code, "XLM"),
+        amount: amountValue.toString(),
+        age: timeAgo(createdAt),
+      };
+    }),
+  };
+}
 
 export default function DashboardPage() {
   const { campaignId } = useParams();
@@ -40,7 +131,7 @@ export default function DashboardPage() {
         const res = await fetch(`${API_BASE_URL}/analytics/${campaignId}`);
         if (!res.ok) throw new Error("Failed to fetch analytics");
         const json = await res.json();
-        setData(json);
+        setData(normalizeAnalyticsResponse(json));
       } catch (err: any) {
         setError(err.message);
       } finally {
@@ -209,7 +300,7 @@ export default function DashboardPage() {
           </motion.div>
         </div>
 
-        {/* Mock Activity Section */}
+        {/* Recent Transactions */}
         <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
           <h3 className="mb-6 text-sm font-semibold uppercase tracking-widest text-steel font-mono">
             On-Chain Explorer Integration
@@ -226,11 +317,7 @@ export default function DashboardPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5">
-                {[
-                  { id: 1, type: "One-time", user: "G...3f2k", asset: "XLM", amount: "500", age: "2h ago" },
-                  { id: 2, type: "Drip", user: "G...as91", asset: "USDC", amount: "15", age: "5h ago" },
-                  { id: 3, type: "One-time", user: "G...78m2", asset: "AQUA", amount: "1200", age: "1d ago" },
-                ].map((item) => (
+                {data.recentTransactions.map((item) => (
                   <tr key={item.id} className="group hover:bg-white/[0.02] transition-colors">
                     <td className="py-4 pr-4">
                       <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${
@@ -245,6 +332,13 @@ export default function DashboardPage() {
                     <td className="py-4 pr-4 text-right tabular-nums">{item.age}</td>
                   </tr>
                 ))}
+                {data.recentTransactions.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="py-8 text-center text-steel">
+                      No recent transactions yet.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
