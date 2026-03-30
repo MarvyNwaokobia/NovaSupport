@@ -50,6 +50,39 @@ cargo test
 Install Soroban CLI separately if you want to build, deploy, or inspect the contract on Stellar Testnet.
 
 
+### Local Database Setup (Docker)
+
+For local development, you can use Docker Compose to run PostgreSQL instead of setting up Supabase:
+
+```sh
+# Start the database
+docker compose up -d
+
+# Run migrations and seed data
+cd backend
+npm install
+npm run db:generate
+npm run db:migrate
+npm run db:seed
+```
+
+To stop the container:
+```sh
+docker compose down
+```
+
+To wipe all data and start fresh:
+```sh
+docker compose down -v
+```
+
+The Docker container uses these default credentials (matching `backend/.env.example`):
+- User: `novasupport`
+- Password: `novasupport`
+- Database: `novasupport`
+- Port: `5432`
+
+
 ## Guidance For Small PRs
 
 - one concern per PR is ideal
