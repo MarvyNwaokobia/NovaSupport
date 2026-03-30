@@ -115,7 +115,7 @@ export default async function ProfilePage({ params }: PageProps) {
         </div>
 
         <aside className="sticky top-24">
-          <SupportPanel walletAddress={profile.walletAddress} />
+          <SupportPanel walletAddress={profile.walletAddress} acceptedAssets={profile.acceptedAssets} />
           
           <div className="mt-6 rounded-3xl border border-white/5 bg-white/[0.02] p-6">
             <h4 className="text-[10px] uppercase tracking-[0.25em] text-steel font-bold mb-4">

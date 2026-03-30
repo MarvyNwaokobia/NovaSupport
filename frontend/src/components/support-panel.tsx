@@ -4,12 +4,24 @@ import { useState } from "react";
 import { getNetworkLabel, stellarConfig } from "@/lib/stellar";
 import { WalletConnect } from "./wallet-connect";
 
-type SupportPanelProps = {
-  walletAddress: string;
+type Asset = {
+  code: string;
+  issuer?: string | null;
 };
 
-export function SupportPanel({ walletAddress }: SupportPanelProps) {
+type SupportPanelProps = {
+  walletAddress: string;
+  acceptedAssets: Asset[];
+};
+
+export function SupportPanel({ walletAddress, acceptedAssets }: SupportPanelProps) {
   const [visitorAddress, setVisitorAddress] = useState<string | null>(null);
+  const [amount, setAmount] = useState("");
+
+  const selectedAsset = acceptedAssets[0];
+  const amountNum = parseFloat(amount);
+  const isValidAmount = amountNum > 0;
+  const showError = amount !== "" && !isValidAmount;
 
   if (!visitorAddress) {
     return (
@@ -45,6 +57,41 @@ export function SupportPanel({ walletAddress }: SupportPanelProps) {
           <p className="mt-2 break-all text-sm text-white">{walletAddress}</p>
         </div>
       </div>
+
+      {/* Amount Input */}
+      <div className="mt-6">
+        <label className="text-xs uppercase tracking-[0.2em] text-sky/70 block mb-2">
+          Amount
+        </label>
+        <div className="flex gap-2">
+          <input
+            type="number"
+            min="0.0000001"
+            step="0.0000001"
+            placeholder="0.00"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            className="flex-1 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-sky/50 focus:border-mint/50 focus:outline-none"
+          />
+          <div className="flex items-center rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-sky/80 min-w-[80px] justify-center">
+            <span className="font-semibold text-white">{selectedAsset?.code || "XLM"}</span>
+          </div>
+        </div>
+        {showError && (
+          <p className="mt-2 text-xs text-red-400">
+            Please enter a positive amount
+          </p>
+        )}
+      </div>
+
+      {/* Send Support Button */}
+      <button
+        type="button"
+        disabled={!isValidAmount}
+        className="mt-6 w-full rounded-full bg-mint px-5 py-3 text-sm font-semibold text-ink transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-mint"
+      >
+        Send Support
+      </button>
     </section>
   );
 }
