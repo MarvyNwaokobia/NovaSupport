@@ -778,6 +778,10 @@ export function createApp(customLogger?: Logger) {
   });
 
   async function verifyTransaction(txHash: string): Promise<boolean | "error"> {
+    if (process.env.SKIP_HORIZON_VALIDATION === "true") {
+      return true;
+    }
+
     try {
       const tx = await stellarServer.transactions().transaction(txHash).call();
       return tx.successful === true;
