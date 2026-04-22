@@ -38,11 +38,8 @@ jobs:
         with:
           workspaces: contract
 
-      - name: Build contract for native target
-        run: cargo build --release
-
-      - name: Build contract for WASM target
-        run: cargo build --target wasm32-unknown-unknown --release
-
       - name: Run contract tests
         run: cargo test
+
+      - name: Build contract WASM
+        run: cargo build --target wasm32-unknown-unknown --release
