@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { 
   History, Award, LayoutDashboard, 
-  ExternalLink, Clock, ShieldCheck 
+  ExternalLink, ShieldCheck 
 } from "lucide-react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
@@ -135,24 +135,12 @@ export function ProfileTabs({ username }: { username: string }) {
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
-            className="grid grid-cols-2 gap-4 sm:grid-cols-4"
+            className="min-h-[300px]"
           >
-            <BadgeCard 
-              name="Early Bird" 
-              desc="Supported in the first 24h" 
-              date="Mar 2024"
-              color="text-gold"
-            />
-            <BadgeCard 
-              name="Nova Whale" 
-              desc="5,000+ XLM Contributed" 
-              locked
-            />
-            <BadgeCard 
-              name="Consistent" 
-              desc="Active Drip for 3 months" 
-              locked
-            />
+            <div className="flex flex-col items-center justify-center py-12 text-center text-gray-400">
+              <p className="text-lg font-medium">Badges coming soon</p>
+              <p className="text-sm mt-1">Achievement badges will appear here once earned.</p>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -173,25 +161,5 @@ function TabButton({ active, onClick, icon, label }: any) {
       {icon}
       {label}
     </button>
-  );
-}
-
-function BadgeCard({ name, desc, date, color = "text-steel/50", locked = false }: any) {
-  return (
-    <div className={`relative flex flex-col items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-6 text-center ${locked ? "opacity-50 grayscale" : ""}`}>
-      <div className={`rounded-xl bg-white/5 p-3 ${color}`}>
-        <Award size={32} />
-      </div>
-      <div>
-        <h4 className="text-xs font-bold text-white uppercase tracking-wider">{name}</h4>
-        <p className="mt-1 text-[10px] text-steel leading-tight">{desc}</p>
-        {date && <p className="mt-2 text-[9px] font-mono text-mint/60">{date}</p>}
-      </div>
-      {locked && (
-        <div className="absolute right-2 top-2 rounded-full bg-black/40 p-1">
-          <Clock size={10} className="text-white/40" />
-        </div>
-      )}
-    </div>
   );
 }

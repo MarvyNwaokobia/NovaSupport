@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { ProfileTabs } from '@/components/profile-tabs';
 
 // Mock framer-motion to avoid animation issues in tests
@@ -63,5 +63,20 @@ describe('ProfileTabs', () => {
 
     expect(await screen.findByText('100 XLM')).toBeInTheDocument();
     expect(screen.queryByText('No support yet')).not.toBeInTheDocument();
+  });
+
+  it('renders badges coming soon empty state', () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      json: async () => ({ transactions: [] }),
+    }));
+
+    render(<ProfileTabs username="stellar-dev" />);
+
+    // Click on the badges tab
+    const badgesTab = screen.getByText('Badges');
+    fireEvent.click(badgesTab);
+
+    expect(screen.getByText('Badges coming soon')).toBeInTheDocument();
+    expect(screen.getByText('Achievement badges will appear here once earned.')).toBeInTheDocument();
   });
 });
