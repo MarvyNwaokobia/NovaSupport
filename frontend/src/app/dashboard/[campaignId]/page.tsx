@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { 
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -34,6 +35,22 @@ interface AnalyticsData {
   }[];
 }
 
+type ProfileSettings = {
+  walletAddress: string;
+  email?: string | null;
+  notifyOnSupport?: boolean;
+};
+
+type TransactionCsvRow = {
+  createdAt: string;
+  amount: string;
+  assetCode: string;
+  supporterAddress: string;
+  message: string;
+  status: string;
+  txHash: string;
+};
+
 const COLORS = ["#00FFC2", "#00E0FF", "#FFB800", "#FF4D4D", "#9D4EDD"];
 
 function toNumber(value: unknown): number {
@@ -47,6 +64,10 @@ function toNumber(value: unknown): number {
 
 function toString(value: unknown, fallback = ""): string {
   return typeof value === "string" ? value : fallback;
+}
+
+function toBool(value: unknown, fallback = true): boolean {
+  return typeof value === "boolean" ? value : fallback;
 }
 
 function timeAgo(value: string): string {
@@ -119,19 +140,76 @@ function normalizeAnalyticsResponse(json: unknown): AnalyticsData {
   };
 }
 
+function csvEscape(value: string): string {
+  const escaped = value.replace(/"/g, "\"\"");
+  return `"${escaped}"`;
+}
+
+function downloadCsv(rows: TransactionCsvRow[]): void {
+  const headers = [
+    "Date",
+    "Amount",
+    "Asset",
+    "From Address",
+    "Message",
+    "Status",
+    "TX Hash",
+    "Stellar Expert URL",
+  ];
+  const lines = rows.map((row) => {
+    const stellarExpertUrl = `https://stellar.expert/explorer/testnet/tx/${row.txHash}`;
+    return [
+      new Date(row.createdAt).toISOString(),
+      row.amount,
+      row.assetCode,
+      row.supporterAddress,
+      row.message,
+      row.status,
+      row.txHash,
+      stellarExpertUrl,
+    ].map(csvEscape).join(",");
+  });
+
+  const csv = `${headers.join(",")}\n${lines.join("\n")}`;
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "novasupport-transactions.csv";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 export default function DashboardPage() {
   const { campaignId } = useParams();
   const [data, setData] = useState<AnalyticsData | null>(null);
+  const [settings, setSettings] = useState<ProfileSettings | null>(null);
+  const [connectedWallet, setConnectedWallet] = useState("");
+  const [csvLoading, setCsvLoading] = useState(false);
+  const [settingsSaving, setSettingsSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     async function fetchData() {
       try {
-        const res = await fetch(`${API_BASE_URL}/analytics/${campaignId}`);
-        if (!res.ok) throw new Error("Failed to fetch analytics");
-        const json = await res.json();
+        const [analyticsRes, profileRes] = await Promise.all([
+          fetch(`${API_BASE_URL}/analytics/${campaignId}`),
+          fetch(`${API_BASE_URL}/profiles/${campaignId}`),
+        ]);
+        if (!analyticsRes.ok) throw new Error("Failed to fetch analytics");
+        if (!profileRes.ok) throw new Error("Failed to fetch profile settings");
+
+        const json = await analyticsRes.json();
+        const profileJson = (await profileRes.json()) as Record<string, unknown>;
         setData(normalizeAnalyticsResponse(json));
+        setSettings({
+          walletAddress: toString(profileJson.walletAddress),
+          email: toString(profileJson.email, "") || null,
+          notifyOnSupport: toBool(profileJson.notifyOnSupport, true),
+        });
       } catch (err: any) {
         setError(err.message);
       } finally {
@@ -140,6 +218,63 @@ export default function DashboardPage() {
     }
     fetchData();
   }, [campaignId]);
+
+  useEffect(() => {
+    const wallet = window.localStorage.getItem("walletAddress");
+    if (wallet) setConnectedWallet(wallet);
+  }, []);
+
+  const isOwner = Boolean(
+    settings?.walletAddress &&
+    connectedWallet &&
+    settings.walletAddress === connectedWallet
+  );
+
+  async function handleDownloadCsv() {
+    if (!isOwner) return;
+    setCsvLoading(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/profiles/${campaignId}/transactions?limit=1000`);
+      if (!res.ok) throw new Error("Failed to fetch full transactions");
+      const json = (await res.json()) as { transactions?: Array<Record<string, unknown>> };
+      const rows: TransactionCsvRow[] = (json.transactions ?? []).map((tx) => ({
+        createdAt: toString(tx.createdAt, new Date().toISOString()),
+        amount: toString(tx.amount, "0"),
+        assetCode: toString(tx.assetCode, "XLM"),
+        supporterAddress: toString(tx.supporterAddress, ""),
+        message: toString(tx.message, ""),
+        status: toString(tx.status, ""),
+        txHash: toString(tx.txHash, ""),
+      }));
+      downloadCsv(rows);
+    } catch (err: any) {
+      setError(err.message ?? "Failed to download CSV");
+    } finally {
+      setCsvLoading(false);
+    }
+  }
+
+  async function handleNotificationToggle(next: boolean) {
+    if (!isOwner || !settings) return;
+    const prev = settings.notifyOnSupport ?? true;
+    setSettingsSaving(true);
+    setSettings({ ...settings, notifyOnSupport: next });
+    try {
+      const res = await fetch(`${API_BASE_URL}/profiles/${campaignId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ notifyOnSupport: next }),
+      });
+      if (!res.ok) {
+        throw new Error("Failed to save notification preference");
+      }
+    } catch (err: any) {
+      setSettings({ ...settings, notifyOnSupport: prev });
+      setError(err.message ?? "Failed to save setting");
+    } finally {
+      setSettingsSaving(false);
+    }
+  }
 
   if (loading) return (
     <AppShell>
@@ -302,9 +437,28 @@ export default function DashboardPage() {
 
         {/* Recent Transactions */}
         <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
-          <h3 className="mb-6 text-sm font-semibold uppercase tracking-widest text-steel font-mono">
-            On-Chain Explorer Integration
-          </h3>
+          <div className="mb-6 flex items-center justify-between gap-4">
+            <h3 className="text-sm font-semibold uppercase tracking-widest text-steel font-mono">
+              On-Chain Explorer Integration
+            </h3>
+            {isOwner && (
+              <button
+                type="button"
+                onClick={handleDownloadCsv}
+                disabled={csvLoading}
+                className="inline-flex items-center justify-center rounded-xl border border-mint/30 bg-mint/10 px-4 py-2 text-xs font-bold text-mint transition hover:bg-mint/20 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {csvLoading ? (
+                  <span className="flex items-center gap-2">
+                    <span className="h-3 w-3 animate-spin rounded-full border border-mint border-t-transparent" />
+                    Exporting...
+                  </span>
+                ) : (
+                  "Download CSV"
+                )}
+              </button>
+            )}
+          </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm text-sky/70">
               <thead className="border-b border-white/10 text-[10px] uppercase tracking-widest text-steel">
@@ -343,6 +497,44 @@ export default function DashboardPage() {
             </table>
           </div>
         </section>
+
+        {isOwner && settings && (
+          <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
+            <h3 className="mb-4 text-sm font-semibold uppercase tracking-widest text-steel font-mono">
+              Settings
+            </h3>
+            {settings.email ? (
+              <label className="flex items-center justify-between gap-4 rounded-2xl border border-white/10 bg-white/[0.02] px-4 py-3">
+                <span className="text-sm text-sky/80">
+                  Email me when I receive a new support transaction
+                </span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={Boolean(settings.notifyOnSupport)}
+                  onClick={() => handleNotificationToggle(!settings.notifyOnSupport)}
+                  disabled={settingsSaving}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${
+                    settings.notifyOnSupport ? "bg-mint" : "bg-white/20"
+                  } ${settingsSaving ? "opacity-60 cursor-not-allowed" : ""}`}
+                >
+                  <span
+                    className={`inline-block h-5 w-5 transform rounded-full bg-black transition ${
+                      settings.notifyOnSupport ? "translate-x-5" : "translate-x-1"
+                    }`}
+                  />
+                </button>
+              </label>
+            ) : (
+              <p className="text-sm text-sky/70">
+                Add an email to your profile to enable notifications.{" "}
+                <Link href="/create" className="text-mint hover:underline">
+                  Edit profile
+                </Link>
+              </p>
+            )}
+          </section>
+        )}
       </div>
     </AppShell>
   );
