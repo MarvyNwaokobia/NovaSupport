@@ -24,6 +24,7 @@ model Profile {
   bio                 String
   avatarUrl           String?
   email               String?              @unique
+  notifyOnSupport     Boolean              @default(true)
   websiteUrl          String?
   twitterHandle       String?
   githubHandle        String?

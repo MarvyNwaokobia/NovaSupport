@@ -574,6 +574,7 @@ export function createApp(customLogger?: Logger) {
     bio: z.string().max(280).optional(),
     avatarUrl: z.string().url().optional().nullable(),
     email: z.string().email().optional().nullable(),
+    notifyOnSupport: z.boolean().optional(),
     websiteUrl: z.string().url().startsWith("https://").optional().nullable(),
     twitterHandle: z.string().max(15).regex(/^[a-zA-Z0-9_]+$/).optional().nullable(),
     githubHandle: z.string().max(39).regex(/^[a-zA-Z0-9-]+$/).optional().nullable(),
@@ -837,7 +838,7 @@ export function createApp(customLogger?: Logger) {
    */
   app.get("/profiles/:username/transactions", async (req, res) => {
     const { username } = req.params;
-    const limit = Math.min(parseInt(req.query.limit as string) || 20, 50);
+    const limit = Math.min(parseInt(req.query.limit as string) || 20, 1000);
     const offset = parseInt(req.query.offset as string) || 0;
     const network = req.query.network as string | undefined;
 
@@ -865,6 +866,45 @@ export function createApp(customLogger?: Logger) {
     ]);
 
     res.json({ transactions, total, limit, offset });
+  });
+
+  app.get("/profiles/:username/leaderboard", async (req, res) => {
+    const { username } = req.params;
+
+    const profile = await prisma.profile.findUnique({
+      where: { username },
+    });
+
+    if (!profile) {
+      return sendError(res, 404, "Profile not found");
+    }
+
+    const grouped = await prisma.supportTransaction.groupBy({
+      by: ["supporterAddress", "assetCode"],
+      where: {
+        recipientAddress: profile.walletAddress,
+        status: "SUCCESS",
+        supporterAddress: { not: null },
+      },
+      _sum: { amount: true },
+      orderBy: {
+        _sum: {
+          amount: "desc",
+        },
+      },
+      take: 5,
+    });
+
+    const leaderboard = grouped
+      .filter((entry) => entry.supporterAddress)
+      .map((entry, index) => ({
+        rank: index + 1,
+        supporterAddress: entry.supporterAddress as string,
+        totalAmount: entry._sum.amount?.toString() ?? "0",
+        assetCode: entry.assetCode,
+      }));
+
+    return res.json({ leaderboard });
   });
 
   /**
@@ -947,10 +987,10 @@ export function createApp(customLogger?: Logger) {
       try {
         const recipientProfile = await prisma.profile.findUnique({
           where: { id: supportRecord.profileId },
-          select: { email: true, displayName: true },
+          select: { email: true, displayName: true, notifyOnSupport: true },
         });
 
-        if (recipientProfile?.email) {
+        if (recipientProfile?.email && recipientProfile.notifyOnSupport !== false) {
           const mail = contributionReceivedEmail({
             creatorName: recipientProfile.displayName,
             supporterAddress: supportRecord.supporterAddress ?? "Anonymous",

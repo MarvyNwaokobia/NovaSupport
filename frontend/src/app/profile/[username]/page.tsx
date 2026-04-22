@@ -30,6 +30,13 @@ type SupportTx = {
   senderAddress: string;
 };
 
+type LeaderboardEntry = {
+  rank: number;
+  supporterAddress: string;
+  totalAmount: string;
+  assetCode: string;
+};
+
 async function getProfile(username: string): Promise<Profile> {
   // Use a cache-busting or lower revalidation for profile page
   const res = await fetch(`${API_BASE_URL}/profiles/${username}`, {
@@ -50,7 +57,9 @@ async function getProfile(username: string): Promise<Profile> {
 export async function generateMetadata(
   { params }: { params: { username: string } }
 ): Promise<Metadata> {
-  const res = await fetch(`${API_BASE_URL}/profiles/${params.username}`);
+  const res = await fetch(`${API_BASE_URL}/profiles/${params.username}`, {
+    next: { revalidate: 60 },
+  });
 
   if (!res.ok) {
     return {
@@ -61,19 +70,19 @@ export async function generateMetadata(
   const profile: Profile = await res.json();
 
   return {
-    title: `${profile.displayName} (@${profile.username}) — NovaSupport`,
+    title: `${profile.displayName} on NovaSupport`,
     description: profile.bio ?? `Support ${profile.displayName} on NovaSupport`,
     openGraph: {
-      title: `${profile.displayName} — NovaSupport`,
-      description: profile.bio ?? `Support ${profile.displayName} on the Stellar network`,
-      images: profile.avatarUrl ? [{ url: profile.avatarUrl }] : [],
-      url: `${process.env.NEXT_PUBLIC_APP_URL || ''}/profile/${profile.username}`,
+      title: `${profile.displayName} on NovaSupport`,
+      description: profile.bio ?? `Support ${profile.displayName} on NovaSupport`,
+      images: profile.avatarUrl ? [profile.avatarUrl] : [],
+      url: `https://novasupport.xyz/profile/${params.username}`,
       type: 'profile',
     },
     twitter: {
       card: 'summary',
-      title: `${profile.displayName} — NovaSupport`,
-      description: profile.bio ?? `Support ${profile.displayName} on the Stellar network`,
+      title: `${profile.displayName} on NovaSupport`,
+      description: profile.bio ?? `Support ${profile.displayName} on NovaSupport`,
       images: profile.avatarUrl ? [profile.avatarUrl] : [],
     },
   };
@@ -91,10 +100,43 @@ async function getTransactions(username: string, limit = 10): Promise<SupportTx[
   return body.transactions ?? [];
 }
 
+function truncateAddress(address: string): string {
+  if (address.length <= 10) return address;
+  return `${address.slice(0, 4)}...${address.slice(-4)}`;
+}
+
+async function getLeaderboard(username: string): Promise<LeaderboardEntry[]> {
+  const res = await fetch(`${API_BASE_URL}/profiles/${username}/leaderboard`, {
+    next: { revalidate: 60 },
+  });
+
+  if (!res.ok) return [];
+
+  const body = (await res.json()) as {
+    leaderboard?: Array<Record<string, unknown>>;
+  };
+
+  const source = body.leaderboard ?? [];
+  return source.slice(0, 5).map((entry, index) => {
+    const address = String(entry.supporterAddress ?? entry.supporter_address ?? entry.address ?? "");
+    const amount = String(entry.totalAmount ?? entry.total_amount ?? entry.amount ?? "0");
+    const assetCode = String(entry.assetCode ?? entry.asset_code ?? entry.asset ?? "XLM");
+    const rankFromApi = Number(entry.rank);
+
+    return {
+      rank: Number.isFinite(rankFromApi) && rankFromApi > 0 ? rankFromApi : index + 1,
+      supporterAddress: address,
+      totalAmount: amount,
+      assetCode,
+    };
+  }).filter((entry) => entry.supporterAddress.length > 0);
+}
+
 export default async function ProfilePage({ params }: PageProps) {
-  const [profile, transactions] = await Promise.all([
+  const [profile, transactions, leaderboard] = await Promise.all([
     getProfile(params.username),
     getTransactions(params.username, 10),
+    getLeaderboard(params.username),
   ]);
 
   return (
@@ -117,6 +159,32 @@ export default async function ProfilePage({ params }: PageProps) {
 
         <aside className="sticky top-24">
           <SupportPanel walletAddress={profile.walletAddress} acceptedAssets={profile.acceptedAssets} />
+
+          {leaderboard.length > 0 && (
+            <div className="mt-6 rounded-3xl border border-white/5 bg-white/[0.02] p-6">
+              <h4 className="text-[10px] uppercase tracking-[0.25em] text-steel font-bold mb-4">
+                Top Supporters
+              </h4>
+              <div className="space-y-3">
+                {leaderboard.map((entry) => (
+                  <div key={`${entry.rank}-${entry.supporterAddress}`} className="flex items-center justify-between gap-4">
+                    <span className="text-xs text-sky/70">#{entry.rank}</span>
+                    <a
+                      href={`https://stellar.expert/explorer/testnet/account/${entry.supporterAddress}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-mono text-xs text-white hover:text-mint transition-colors"
+                    >
+                      {truncateAddress(entry.supporterAddress)}
+                    </a>
+                    <span className="text-xs font-semibold text-mint">
+                      {entry.totalAmount} {entry.assetCode}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           
           <div className="mt-6 rounded-3xl border border-white/5 bg-white/[0.02] p-6">
             <h4 className="text-[10px] uppercase tracking-[0.25em] text-steel font-bold mb-4">
