@@ -1520,6 +1520,231 @@ export function createApp(customLogger?: Logger) {
     },
   );
 
+  // ── Profile Stats ──────────────────────────────────────────────────────
+
+  app.get("/profiles/:username/stats", async (req, res) => {
+    try {
+      const profile = await prisma.profile.findUnique({
+        where: { username: req.params.username },
+      });
+
+      if (!profile) {
+        return sendError(res, 404, "Profile not found");
+      }
+
+      const [transactions, uniqueSupporters] = await Promise.all([
+        prisma.supportTransaction.findMany({
+          where: { recipientAddress: profile.walletAddress },
+        }),
+        prisma.supportTransaction.findMany({
+          where: { recipientAddress: profile.walletAddress },
+          distinct: ["supporterAddress"],
+          select: { supporterAddress: true },
+        }),
+      ]);
+
+      const assetBreakdown: Record<string, number> = {};
+      let totalEarned = 0;
+
+      transactions.forEach((tx) => {
+        const amount = parseFloat(tx.amount.toString());
+        totalEarned += amount;
+        const key = `${tx.assetCode}${tx.assetIssuer ? `:${tx.assetIssuer}` : ""}`;
+        assetBreakdown[key] = (assetBreakdown[key] || 0) + amount;
+      });
+
+      res.json({
+        totalEarned,
+        totalTransactions: transactions.length,
+        uniqueSupporters: uniqueSupporters.length,
+        assetBreakdown,
+      });
+    } catch {
+      return sendError(res, 500, "Internal server error");
+    }
+  });
+
+  // ── Milestones ─────────────────────────────────────────────────────────
+
+  const createMilestoneSchema = z.object({
+    title: z.string().min(1).max(100),
+    description: z.string().max(500).optional().nullable(),
+    targetAmount: z.string().min(1),
+    assetCode: z.string().default("XLM"),
+  });
+
+  app.post("/profiles/:username/milestones", async (req, res) => {
+    try {
+      const profile = await prisma.profile.findUnique({
+        where: { username: req.params.username },
+      });
+
+      if (!profile) {
+        return sendError(res, 404, "Profile not found");
+      }
+
+      const parsed = createMilestoneSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return sendError(res, 400, "Invalid request body");
+      }
+
+      const milestone = await prisma.milestone.create({
+        data: {
+          title: parsed.data.title,
+          description: parsed.data.description,
+          targetAmount: parsed.data.targetAmount,
+          assetCode: parsed.data.assetCode,
+          profileId: profile.id,
+        },
+      });
+
+      res.status(201).json(milestone);
+    } catch {
+      return sendError(res, 500, "Internal server error");
+    }
+  });
+
+  app.get("/profiles/:username/milestones", async (req, res) => {
+    try {
+      const profile = await prisma.profile.findUnique({
+        where: { username: req.params.username },
+      });
+
+      if (!profile) {
+        return sendError(res, 404, "Profile not found");
+      }
+
+      const milestones = await prisma.milestone.findMany({
+        where: { profileId: profile.id },
+        orderBy: { createdAt: "desc" },
+      });
+
+      res.json({ milestones });
+    } catch {
+      return sendError(res, 500, "Internal server error");
+    }
+  });
+
+  app.patch("/profiles/:username/milestones/:milestoneId", async (req, res) => {
+    try {
+      const profile = await prisma.profile.findUnique({
+        where: { username: req.params.username },
+      });
+
+      if (!profile) {
+        return sendError(res, 404, "Profile not found");
+      }
+
+      const milestone = await prisma.milestone.findUnique({
+        where: { id: req.params.milestoneId },
+      });
+
+      if (!milestone || milestone.profileId !== profile.id) {
+        return sendError(res, 404, "Milestone not found");
+      }
+
+      const parsed = createMilestoneSchema.partial().safeParse(req.body);
+      if (!parsed.success) {
+        return sendError(res, 400, "Invalid request body");
+      }
+
+      const updated = await prisma.milestone.update({
+        where: { id: req.params.milestoneId },
+        data: parsed.data,
+      });
+
+      res.json(updated);
+    } catch {
+      return sendError(res, 500, "Internal server error");
+    }
+  });
+
+  app.delete("/profiles/:username/milestones/:milestoneId", async (req, res) => {
+    try {
+      const profile = await prisma.profile.findUnique({
+        where: { username: req.params.username },
+      });
+
+      if (!profile) {
+        return sendError(res, 404, "Profile not found");
+      }
+
+      const milestone = await prisma.milestone.findUnique({
+        where: { id: req.params.milestoneId },
+      });
+
+      if (!milestone || milestone.profileId !== profile.id) {
+        return sendError(res, 404, "Milestone not found");
+      }
+
+      await prisma.milestone.delete({
+        where: { id: req.params.milestoneId },
+      });
+
+      res.status(204).send();
+    } catch {
+      return sendError(res, 500, "Internal server error");
+    }
+  });
+
+  // ── Supporters ─────────────────────────────────────────────────────────
+
+  app.get("/supporters/:address", async (req, res) => {
+    try {
+      const { address } = req.params;
+
+      if (!StrKey.isValidEd25519PublicKey(address)) {
+        return sendError(res, 400, "Invalid Stellar address");
+      }
+
+      const transactions = await prisma.supportTransaction.findMany({
+        where: { supporterAddress: address },
+        include: { profile: true },
+        orderBy: { createdAt: "desc" },
+      });
+
+      if (transactions.length === 0) {
+        return res.json({
+          address,
+          totalTransactions: 0,
+          profilesSupported: 0,
+          totalByAsset: {},
+          transactions: [],
+        });
+      }
+
+      const profilesSupported = new Set(transactions.map((tx) => tx.profileId)).size;
+      const totalByAsset: Record<string, number> = {};
+
+      transactions.forEach((tx) => {
+        const amount = parseFloat(tx.amount.toString());
+        const key = `${tx.assetCode}${tx.assetIssuer ? `:${tx.assetIssuer}` : ""}`;
+        totalByAsset[key] = (totalByAsset[key] || 0) + amount;
+      });
+
+      res.json({
+        address,
+        totalTransactions: transactions.length,
+        profilesSupported,
+        totalByAsset,
+        transactions: transactions.map((tx) => ({
+          id: tx.id,
+          amount: tx.amount.toString(),
+          assetCode: tx.assetCode,
+          assetIssuer: tx.assetIssuer,
+          txHash: tx.txHash,
+          createdAt: tx.createdAt,
+          profile: {
+            username: tx.profile.username,
+            displayName: tx.profile.displayName,
+          },
+        })),
+      });
+    } catch {
+      return sendError(res, 500, "Internal server error");
+    }
+  });
+
   return app;
 }
 

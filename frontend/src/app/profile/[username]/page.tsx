@@ -31,6 +31,16 @@ type SupportTx = {
   senderAddress: string;
 };
 
+type Milestone = {
+  id: string;
+  title: string;
+  description?: string | null;
+  targetAmount: string;
+  currentAmount: string;
+  assetCode: string;
+  status: string;
+  createdAt: string;
+    }
 type LeaderboardEntry = {
   rank: number;
   supporterAddress: string;
@@ -177,6 +187,8 @@ export default async function ProfilePage({ params }: PageProps) {
     getStats(params.username),
   ]);
 
+  const activeMilestones = milestones.filter((m) => m.status === "active");
+
   return (
     <AppShell>
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_380px] gap-8 items-start">
@@ -191,6 +203,64 @@ export default async function ProfilePage({ params }: PageProps) {
             stats={stats || undefined}
           />
 
+          {activeMilestones.length > 0 && (
+            <div className="px-2 space-y-4">
+              <h3 className="text-sm font-semibold uppercase tracking-widest text-steel">
+                Funding Goals
+              </h3>
+              <div className="space-y-4">
+                {activeMilestones.map((milestone) => {
+                  const progress = Math.min(
+                    (parseFloat(milestone.currentAmount) / parseFloat(milestone.targetAmount)) * 100,
+                    100
+                  );
+                  const isReached = milestone.status === "reached" || progress >= 100;
+
+                  return (
+                    <div
+                      key={milestone.id}
+                      className="rounded-2xl border border-white/10 bg-white/5 p-4"
+                    >
+                      <div className="flex items-start justify-between gap-2 mb-3">
+                        <div className="flex-1 min-w-0">
+                          <h4 className="text-sm font-semibold text-white truncate">
+                            {milestone.title}
+                          </h4>
+                          {milestone.description && (
+                            <p className="text-xs text-steel mt-1 line-clamp-2">
+                              {milestone.description}
+                            </p>
+                          )}
+                        </div>
+                        {isReached && (
+                          <span className="text-xs font-bold text-mint whitespace-nowrap">
+                            Reached ✓
+                          </span>
+                        )}
+                      </div>
+                      <div className="space-y-2">
+                        <div className="w-full bg-white/5 h-2 rounded-full overflow-hidden">
+                          <div
+                            className="bg-mint h-full transition-all"
+                            style={{ width: `${progress}%` }}
+                          />
+                        </div>
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-steel">
+                            {parseFloat(milestone.currentAmount).toFixed(2)} / {parseFloat(milestone.targetAmount).toFixed(2)} {milestone.assetCode}
+                          </span>
+                          <span className="text-steel">
+                            {Math.round(progress)}%
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          
           <div className="px-2">
             <ProfileTabs username={profile.username} />
           </div>
