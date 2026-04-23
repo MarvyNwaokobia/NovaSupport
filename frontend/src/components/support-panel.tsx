@@ -59,6 +59,7 @@ export function SupportPanel({
   const [isRecurring, setIsRecurring] = useState(false);
   const [frequency, setFrequency] = useState<"weekly" | "monthly">("monthly");
   const [recurringError, setRecurringError] = useState<string | null>(null);
+  const [message, setMessage] = useState("");
   const [isAccountFunded, setIsAccountFunded] = useState(true);
   const [isBalanceLoading, setIsBalanceLoading] = useState(false);
 
@@ -236,6 +237,7 @@ export function SupportPanel({
           sourceAccount: visitorAddress,
           destination: walletAddress,
           amount,
+          memo: message || undefined,
           assetCode: recipientAsset?.issuer ? recipientAsset.code : undefined,
           assetIssuer: recipientAsset?.issuer ?? undefined,
         });
@@ -255,6 +257,7 @@ export function SupportPanel({
           sourceAmount: amount,
           destAsset,
           destAddress: walletAddress,
+          memo: message || undefined,
         });
       }
 
@@ -308,6 +311,7 @@ export function SupportPanel({
                 assetCode: recipientAsset?.code || "XLM",
                 assetIssuer: recipientAsset?.issuer,
                 frequency,
+                message: message || undefined,
               }),
             },
           );
@@ -477,6 +481,25 @@ export function SupportPanel({
         )}
       </div>
 
+      {/* Message Input */}
+      <div className="mt-6">
+        <div className="flex items-center justify-between mb-2">
+          <label className="text-xs uppercase tracking-[0.2em] text-sky/70">
+            Leave a message (optional)
+          </label>
+          <span className={`text-[10px] font-medium ${message.length >= 28 ? 'text-red-400' : 'text-sky/40'}`}>
+            {message.length} / 28
+          </span>
+        </div>
+        <textarea
+          value={message}
+          onChange={(e) => setMessage(e.target.value.slice(0, 28))}
+          placeholder="e.g. Keep up the great work!"
+          rows={2}
+          className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-sky/30 focus:border-mint/50 focus:outline-none resize-none"
+        />
+      </div>
+
       {/* Recurring Support Toggle */}
       <div className="mt-6 rounded-xl border border-white/10 bg-white/5 p-4">
         <label className="flex items-center gap-3 cursor-pointer">
@@ -580,6 +603,7 @@ export function SupportPanel({
         onClose={() => {
           setShowResultModal(false);
           setAmount("");
+          setMessage("");
           setSubmittedHash(null);
           setErrorMessage(null);
           setRecurringError(null);
