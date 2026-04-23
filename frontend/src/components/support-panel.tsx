@@ -1,9 +1,14 @@
-"use client";
-
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { signTransaction } from "@stellar/freighter-api";
-import { TransactionBuilder } from "@stellar/stellar-sdk";
-import { buildSupportIntent, getNetworkLabel, horizonServer, stellarConfig } from "@/lib/stellar";
+import { Asset as StellarAsset, TransactionBuilder } from "@stellar/stellar-sdk";
+import { 
+  buildSupportIntent, 
+  buildPathPaymentIntent, 
+  getNetworkLabel, 
+  horizonServer, 
+  stellarConfig,
+  horizonServer as server
+} from "@/lib/stellar";
 import { WalletConnect } from "./wallet-connect";
 
 type Asset = {
@@ -18,18 +23,89 @@ type SupportPanelProps = {
 
 export function SupportPanel({ walletAddress, acceptedAssets }: SupportPanelProps) {
   const [visitorAddress, setVisitorAddress] = useState<string | null>(null);
+  const [visitorBalances, setVisitorBalances] = useState<any[]>([]);
+  const [paymentAsset, setPaymentAsset] = useState<{ code: string; issuer?: string } | null>(null);
   const [amount, setAmount] = useState("");
   const [isSigning, setIsSigning] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [submittedHash, setSubmittedHash] = useState<string | null>(null);
+  const [estimatedReceived, setEstimatedReceived] = useState<string | null>(null);
+  const [isFindingPath, setIsFindingPath] = useState(false);
+  const [noPathFound, setNoPathFound] = useState(false);
+
   const networkLabel = getNetworkLabel();
 
-  const selectedAsset = acceptedAssets?.[0];
+  const recipientAsset = acceptedAssets?.[0] || { code: "XLM" };
   const amountNum = parseFloat(amount);
   const isValidAmount = amountNum > 0;
   const showError = amount !== "" && !isValidAmount;
-  const isProcessing = isSigning || isSubmitting;
+  const isProcessing = isSigning || isSubmitting || isFindingPath;
+
+  useEffect(() => {
+    if (visitorAddress) {
+      horizonServer.loadAccount(visitorAddress)
+        .then((acc) => {
+          const balances = acc.balances.filter((b: any) => parseFloat(b.balance) > 0 || b.asset_type === 'native');
+          setVisitorBalances(balances);
+          // Default to XLM if available, else first balance
+          const xlm = balances.find((b: any) => b.asset_type === 'native');
+          if (xlm) {
+            setPaymentAsset({ code: "XLM" });
+          } else if (balances.length > 0) {
+            setPaymentAsset({ code: balances[0].asset_code, issuer: balances[0].asset_issuer });
+          }
+        })
+        .catch((err) => {
+          console.error("Failed to load visitor account", err);
+        });
+    } else {
+      setVisitorBalances([]);
+      setPaymentAsset(null);
+    }
+  }, [visitorAddress]);
+
+  useEffect(() => {
+    const findPath = async () => {
+      if (!visitorAddress || !paymentAsset || !isValidAmount) {
+        setEstimatedReceived(null);
+        setNoPathFound(false);
+        return;
+      }
+
+      const isSameAsset = paymentAsset.code === recipientAsset.code && 
+        (paymentAsset.code === "XLM" || paymentAsset.issuer === recipientAsset.issuer);
+
+      if (isSameAsset) {
+        setEstimatedReceived(amount);
+        setNoPathFound(false);
+        return;
+      }
+
+      setIsFindingPath(true);
+      setNoPathFound(false);
+      try {
+        const sourceAsset = paymentAsset.code === "XLM" ? StellarAsset.native() : new StellarAsset(paymentAsset.code, paymentAsset.issuer!);
+        const destAsset = recipientAsset.code === "XLM" ? StellarAsset.native() : new StellarAsset(recipientAsset.code, recipientAsset.issuer!);
+        
+        const paths = await horizonServer.strictSendPaths(sourceAsset, amount, [destAsset]).call();
+        if (paths.records.length > 0) {
+          setEstimatedReceived(paths.records[0].destination_amount);
+        } else {
+          setNoPathFound(true);
+          setEstimatedReceived(null);
+        }
+      } catch (err) {
+        console.error("Pathfinding error", err);
+        setNoPathFound(true);
+      } finally {
+        setIsFindingPath(false);
+      }
+    };
+
+    const timer = setTimeout(findPath, 500);
+    return () => clearTimeout(timer);
+  }, [visitorAddress, paymentAsset, amount, recipientAsset]);
 
   function truncateHash(hash: string) {
     return `${hash.slice(0, 8)}...${hash.slice(-8)}`;
@@ -62,32 +138,17 @@ export function SupportPanel({ walletAddress, acceptedAssets }: SupportPanelProp
     if (operationCode === "op_underfunded") {
       return "Insufficient balance";
     }
-
-    if (transactionCode === "tx_too_late") {
-      return "Transaction expired";
-    }
-
-    if (transactionCode === "tx_bad_seq") {
-      return "Transaction sequence is out of date. Please try again.";
-    }
-
-    if (transactionCode === "tx_insufficient_balance") {
-      return "Insufficient balance";
-    }
-
-    if (transactionCode === "tx_bad_auth" || operationCode === "op_bad_auth") {
-      return "Authorization failed. Please reconnect Freighter and try again.";
-    }
-
-    if (error instanceof Error && error.message) {
-      return error.message;
-    }
-
+    if (transactionCode === "tx_too_late") return "Transaction expired";
+    if (transactionCode === "tx_bad_seq") return "Transaction sequence is out of date. Please try again.";
+    if (transactionCode === "tx_insufficient_balance") return "Insufficient balance";
+    if (transactionCode === "tx_bad_auth" || operationCode === "op_bad_auth") return "Authorization failed. Please reconnect Freighter and try again.";
+    
+    if (error instanceof Error && error.message) return error.message;
     return "Unable to submit transaction to Stellar. Please try again.";
   }
 
   async function handleSendSupport() {
-    if (!visitorAddress || !isValidAmount || isProcessing) {
+    if (!visitorAddress || !isValidAmount || isProcessing || noPathFound) {
       return;
     }
 
@@ -96,13 +157,31 @@ export function SupportPanel({ walletAddress, acceptedAssets }: SupportPanelProp
     setIsSigning(true);
 
     try {
-      const unsignedXdr = await buildSupportIntent({
-        sourceAccount: visitorAddress,
-        destination: walletAddress,
-        amount,
-        assetCode: selectedAsset?.issuer ? selectedAsset.code : undefined,
-        assetIssuer: selectedAsset?.issuer ?? undefined,
-      });
+      const isSameAsset = paymentAsset?.code === recipientAsset.code && 
+        (paymentAsset?.code === "XLM" || paymentAsset?.issuer === recipientAsset.issuer);
+
+      let unsignedXdr: string;
+
+      if (isSameAsset) {
+        unsignedXdr = await buildSupportIntent({
+          sourceAccount: visitorAddress,
+          destination: walletAddress,
+          amount,
+          assetCode: recipientAsset?.issuer ? recipientAsset.code : undefined,
+          assetIssuer: recipientAsset?.issuer ?? undefined,
+        });
+      } else {
+        const sourceAsset = paymentAsset?.code === "XLM" ? StellarAsset.native() : new StellarAsset(paymentAsset!.code, paymentAsset!.issuer!);
+        const destAsset = recipientAsset.code === "XLM" ? StellarAsset.native() : new StellarAsset(recipientAsset.code, recipientAsset.issuer!);
+        
+        unsignedXdr = await buildPathPaymentIntent({
+          sourceAccount: visitorAddress,
+          sourceAsset,
+          sourceAmount: amount,
+          destAsset,
+          destAddress: walletAddress,
+        });
+      }
 
       const signedResult = await signTransaction(unsignedXdr, {
         address: visitorAddress,
@@ -157,78 +236,103 @@ export function SupportPanel({ walletAddress, acceptedAssets }: SupportPanelProp
         </span>
       </div>
       <p className="text-xs uppercase tracking-[0.25em] text-gold">Support intent</p>
-      <h2 className="mt-3 text-2xl font-semibold text-white">Ready for a real Stellar flow</h2>
-      <p className="mt-4 max-w-2xl text-sm leading-7 text-sky/85">
-        Build, sign, and submit a {networkLabel} payment to the recipient address below.
-        Successful transactions are broadcast directly to Stellar Testnet and return a live
-        transaction hash from Horizon.
-      </p>
-      <div className="mt-6 grid gap-4 sm:grid-cols-3">
-        <div className="rounded-3xl border border-white/10 bg-ink/40 p-4">
-          <p className="text-xs uppercase tracking-[0.2em] text-sky/70">Network</p>
-          <p className="mt-2 font-semibold text-white">{getNetworkLabel()}</p>
+      <h2 className="mt-3 text-2xl font-semibold text-white">Select assets & support</h2>
+      
+      <div className="mt-6 space-y-4">
+        {/* Payment Asset Selector */}
+        <div>
+          <label className="text-xs uppercase tracking-[0.2em] text-sky/70 block mb-2">
+            Pay with
+          </label>
+          <select 
+            value={paymentAsset ? (paymentAsset.code === "XLM" ? "native" : `${paymentAsset.code}:${paymentAsset.issuer}`) : ""}
+            onChange={(e) => {
+              const val = e.target.value;
+              if (val === "native") setPaymentAsset({ code: "XLM" });
+              else {
+                const [code, issuer] = val.split(":");
+                setPaymentAsset({ code, issuer });
+              }
+            }}
+            className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white focus:border-mint/50 focus:outline-none appearance-none"
+          >
+            {visitorBalances.map((b: any) => (
+              <option key={b.asset_type === 'native' ? 'native' : `${b.asset_code}:${b.asset_issuer}`} value={b.asset_type === 'native' ? 'native' : `${b.asset_code}:${b.asset_issuer}`} className="bg-ink text-white">
+                {b.asset_type === 'native' ? 'XLM' : b.asset_code} ({parseFloat(b.balance).toFixed(2)})
+              </option>
+            ))}
+          </select>
         </div>
-        <div className="rounded-3xl border border-white/10 bg-ink/40 p-4">
-          <p className="text-xs uppercase tracking-[0.2em] text-sky/70">Horizon</p>
-          <p className="mt-2 break-all text-sm text-white">{stellarConfig.horizonUrl}</p>
-        </div>
-        <div className="rounded-3xl border border-white/10 bg-ink/40 p-4">
-          <p className="text-xs uppercase tracking-[0.2em] text-sky/70">Recipient</p>
-          <p className="mt-2 break-all text-sm text-white">{walletAddress}</p>
-        </div>
-      </div>
 
-      {/* Amount Input */}
-      <div className="mt-6">
-        <label className="text-xs uppercase tracking-[0.2em] text-sky/70 block mb-2">
-          Amount
-        </label>
-        <div className="flex gap-2">
-          <input
-            type="number"
-            min="0.0000001"
-            step="0.0000001"
-            placeholder="0.00"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            className="flex-1 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-sky/50 focus:border-mint/50 focus:outline-none"
-          />
-          <div className="flex items-center rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-sky/80 min-w-[80px] justify-center">
-            <span className="font-semibold text-white">{selectedAsset?.code || "XLM"}</span>
+        {/* Amount Input */}
+        <div>
+          <label className="text-xs uppercase tracking-[0.2em] text-sky/70 block mb-2">
+            Amount
+          </label>
+          <div className="flex gap-2">
+            <input
+              type="number"
+              min="0.0000001"
+              step="0.0000001"
+              placeholder="0.00"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              className="flex-1 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-sky/50 focus:border-mint/50 focus:outline-none"
+            />
+            <div className="flex items-center rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-sky/80 min-w-[80px] justify-center">
+              <span className="font-semibold text-white">{paymentAsset?.code || "XLM"}</span>
+            </div>
           </div>
+          {showError && (
+            <p className="mt-2 text-xs text-red-400">
+              Please enter a positive amount
+            </p>
+          )}
         </div>
-        {showError && (
-          <p className="mt-2 text-xs text-red-400">
-            Please enter a positive amount
-          </p>
+
+        {estimatedReceived && (
+          <div className="p-3 rounded-xl bg-white/5 border border-white/5">
+            <p className="text-xs text-mint text-center">
+              Creator receives ~{parseFloat(estimatedReceived).toFixed(4)} {recipientAsset.code}
+            </p>
+          </div>
+        )}
+
+        {noPathFound && (
+          <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20">
+            <p className="text-xs text-red-400 text-center">
+              No DEX path found from {paymentAsset?.code} to {recipientAsset.code}
+            </p>
+          </div>
         )}
       </div>
 
-      {/* Send Support Button */}
-      {errorMessage ? (
+      {errorMessage && (
         <div className="mt-4 rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
           {errorMessage}
         </div>
-      ) : null}
+      )}
 
-      {submittedHash ? (
+      {submittedHash && (
         <div className="mt-4 rounded-2xl border border-mint/30 bg-mint/10 px-4 py-3 text-sm text-mint">
           Transaction submitted:{" "}
           <span className="font-semibold text-white">{truncateHash(submittedHash)}</span>
         </div>
-      ) : null}
+      )}
 
       <button
         type="button"
         onClick={handleSendSupport}
-        disabled={!isValidAmount || isProcessing}
+        disabled={!isValidAmount || isProcessing || noPathFound}
         className="mt-6 w-full rounded-full bg-mint px-5 py-3 text-sm font-semibold text-ink transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-mint"
       >
         {isSubmitting
           ? "Submitting to Stellar network…"
           : isSigning
             ? "Waiting for Freighter signature…"
-            : "Send Support"}
+            : isFindingPath
+              ? "Finding best exchange path…"
+              : "Send Support"}
       </button>
     </section>
   );

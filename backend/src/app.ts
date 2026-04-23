@@ -416,15 +416,16 @@ export function createApp(customLogger?: Logger) {
 
       const where = { profileId: profile.id, status: "SUCCESS" };
 
-      const [totalTransactions, uniqueSupporters, xlmSum] = await Promise.all([
+      const [totalTransactions, uniqueSupporters, assetTotals] = await Promise.all([
         prisma.supportTransaction.count({ where }),
         prisma.supportTransaction.findMany({
           where,
           select: { supporterAddress: true },
           distinct: ["supporterAddress"],
         }),
-        prisma.supportTransaction.aggregate({
-          where: { ...where, assetCode: "XLM" },
+        prisma.supportTransaction.groupBy({
+          by: ["assetCode"],
+          where,
           _sum: { amount: true },
         }),
       ]);
@@ -432,9 +433,10 @@ export function createApp(customLogger?: Logger) {
       res.json({
         totalTransactions,
         uniqueSupporters: uniqueSupporters.length,
-        totalAmountXLM: xlmSum._sum.amount
-          ? xlmSum._sum.amount.toFixed(7)
-          : "0",
+        assetTotals: assetTotals.map((t) => ({
+          assetCode: t.assetCode,
+          total: t._sum.amount ? t._sum.amount.toFixed(7) : "0",
+        })),
       });
     } catch (e: unknown) {
       req.log.error({ err: e }, "database error fetching profile stats");

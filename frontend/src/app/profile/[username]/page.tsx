@@ -132,11 +132,26 @@ async function getLeaderboard(username: string): Promise<LeaderboardEntry[]> {
   }).filter((entry) => entry.supporterAddress.length > 0);
 }
 
+type ProfileStats = {
+  totalTransactions: number;
+  uniqueSupporters: number;
+  assetTotals: Array<{ assetCode: string; total: string }>;
+};
+
+async function getStats(username: string): Promise<ProfileStats | null> {
+  const res = await fetch(`${API_BASE_URL}/profiles/${username}/stats`, {
+    next: { revalidate: 60 }
+  });
+  if (!res.ok) return null;
+  return res.json();
+}
+
 export default async function ProfilePage({ params }: PageProps) {
-  const [profile, transactions, leaderboard] = await Promise.all([
+  const [profile, transactions, leaderboard, stats] = await Promise.all([
     getProfile(params.username),
     getTransactions(params.username, 10),
     getLeaderboard(params.username),
+    getStats(params.username),
   ]);
 
   return (
@@ -150,6 +165,7 @@ export default async function ProfilePage({ params }: PageProps) {
             walletAddress={profile.walletAddress}
             acceptedAssets={profile.acceptedAssets}
             avatarUrl={profile.avatarUrl || undefined}
+            stats={stats || undefined}
           />
           
           <div className="px-2">
