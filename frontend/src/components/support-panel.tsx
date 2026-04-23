@@ -59,17 +59,30 @@ export function SupportPanel({
   const [isRecurring, setIsRecurring] = useState(false);
   const [frequency, setFrequency] = useState<"weekly" | "monthly">("monthly");
   const [recurringError, setRecurringError] = useState<string | null>(null);
+  const [isAccountFunded, setIsAccountFunded] = useState(true);
+  const [isBalanceLoading, setIsBalanceLoading] = useState(false);
 
   const networkLabel = getNetworkLabel();
 
   const recipientAsset = acceptedAssets?.[0] || { code: "XLM" };
   const amountNum = parseFloat(amount);
+  
+  const selectedBalance = visitorBalances.find(b => 
+    paymentAsset?.code === "XLM" 
+      ? b.asset_type === "native" 
+      : b.asset_code === paymentAsset?.code && b.asset_issuer === paymentAsset?.issuer
+  );
+  const availableBalance = selectedBalance ? parseFloat(selectedBalance.balance) : 0;
+  
   const isValidAmount = amountNum > 0;
+  const isOverBalance = amountNum > availableBalance;
   const showError = amount !== "" && !isValidAmount;
   const isProcessing = isSigning || isSubmitting || isFindingPath;
 
   useEffect(() => {
     if (visitorAddress) {
+      setIsBalanceLoading(true);
+      setIsAccountFunded(true);
       horizonServer
         .loadAccount(visitorAddress)
         .then((acc) => {
@@ -91,8 +104,14 @@ export function SupportPanel({
             }
           }
         })
-        .catch((err) => {
+        .catch((err: any) => {
+          if (err?.response?.status === 404) {
+            setIsAccountFunded(false);
+          }
           console.error("Failed to load visitor account", err);
+        })
+        .finally(() => {
+          setIsBalanceLoading(false);
         });
     } else {
       setVisitorBalances([]);
@@ -389,9 +408,28 @@ export function SupportPanel({
 
         {/* Amount Input */}
         <div>
-          <label className="text-xs uppercase tracking-[0.2em] text-sky/70 block mb-2">
-            Amount
-          </label>
+          <div className="flex items-center justify-between mb-2">
+            <label className="text-xs uppercase tracking-[0.2em] text-sky/70">
+              Amount
+            </label>
+            {visitorAddress && (
+              <div className="text-[10px] font-medium text-sky/50">
+                {isBalanceLoading ? (
+                  <span className="animate-pulse">Fetching balance...</span>
+                ) : !isAccountFunded ? (
+                  <a 
+                    href="https://laboratory.stellar.org/#friendbot" 
+                    target="_blank" 
+                    className="text-yellow-500 hover:underline"
+                  >
+                    Account not funded (Testnet)
+                  </a>
+                ) : (
+                  <span>Available: {availableBalance.toFixed(2)} {paymentAsset?.code || "XLM"}</span>
+                )}
+              </div>
+            )}
+          </div>
           <div className="flex gap-2">
             <input
               type="number"
@@ -411,6 +449,11 @@ export function SupportPanel({
           {showError && (
             <p className="mt-2 text-xs text-red-400">
               Please enter a positive amount
+            </p>
+          )}
+          {isOverBalance && isValidAmount && (
+            <p className="mt-2 text-xs text-red-400">
+              Insufficient balance (Limit: {availableBalance.toFixed(7)})
             </p>
           )}
         </div>
@@ -519,7 +562,7 @@ export function SupportPanel({
       <button
         type="button"
         onClick={handleSendSupport}
-        disabled={!isValidAmount || isProcessing || noPathFound}
+        disabled={!isValidAmount || isProcessing || noPathFound || isOverBalance || !isAccountFunded}
         className="mt-6 w-full rounded-full bg-mint px-5 py-3 text-sm font-semibold text-ink transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-mint"
       >
         {isSubmitting
