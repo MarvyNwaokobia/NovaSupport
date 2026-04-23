@@ -199,7 +199,7 @@ export default function ExplorePage() {
 
             {!hasMore && profiles.length > 0 && (
               <p className="mt-8 text-center text-sm text-sky/70">
-                You've reached the end
+                You&apos;ve reached the end
               </p>
             )}
 
