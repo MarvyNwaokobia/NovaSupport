@@ -1,7 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { getNetworkLabel, stellarConfig } from "@/lib/stellar";
+import { signTransaction } from "@stellar/freighter-api";
+import { TransactionBuilder } from "@stellar/stellar-sdk";
+import { buildSupportIntent, getNetworkLabel, horizonServer, stellarConfig } from "@/lib/stellar";
 import { WalletConnect } from "./wallet-connect";
 
 type Asset = {
@@ -17,12 +19,119 @@ type SupportPanelProps = {
 export function SupportPanel({ walletAddress, acceptedAssets }: SupportPanelProps) {
   const [visitorAddress, setVisitorAddress] = useState<string | null>(null);
   const [amount, setAmount] = useState("");
+  const [isSigning, setIsSigning] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [submittedHash, setSubmittedHash] = useState<string | null>(null);
   const networkLabel = getNetworkLabel();
 
   const selectedAsset = acceptedAssets?.[0];
   const amountNum = parseFloat(amount);
   const isValidAmount = amountNum > 0;
   const showError = amount !== "" && !isValidAmount;
+  const isProcessing = isSigning || isSubmitting;
+
+  function truncateHash(hash: string) {
+    return `${hash.slice(0, 8)}...${hash.slice(-8)}`;
+  }
+
+  function mapHorizonError(error: unknown): string {
+    const resultCodes = (
+      error &&
+      typeof error === "object" &&
+      "response" in error &&
+      error.response &&
+      typeof error.response === "object" &&
+      "data" in error.response &&
+      error.response.data &&
+      typeof error.response.data === "object" &&
+      "extras" in error.response.data &&
+      error.response.data.extras &&
+      typeof error.response.data.extras === "object" &&
+      "result_codes" in error.response.data.extras
+    )
+      ? (error.response.data.extras.result_codes as {
+          transaction?: string;
+          operations?: string[];
+        })
+      : null;
+
+    const operationCode = resultCodes?.operations?.[0];
+    const transactionCode = resultCodes?.transaction;
+
+    if (operationCode === "op_underfunded") {
+      return "Insufficient balance";
+    }
+
+    if (transactionCode === "tx_too_late") {
+      return "Transaction expired";
+    }
+
+    if (transactionCode === "tx_bad_seq") {
+      return "Transaction sequence is out of date. Please try again.";
+    }
+
+    if (transactionCode === "tx_insufficient_balance") {
+      return "Insufficient balance";
+    }
+
+    if (transactionCode === "tx_bad_auth" || operationCode === "op_bad_auth") {
+      return "Authorization failed. Please reconnect Freighter and try again.";
+    }
+
+    if (error instanceof Error && error.message) {
+      return error.message;
+    }
+
+    return "Unable to submit transaction to Stellar. Please try again.";
+  }
+
+  async function handleSendSupport() {
+    if (!visitorAddress || !isValidAmount || isProcessing) {
+      return;
+    }
+
+    setErrorMessage(null);
+    setSubmittedHash(null);
+    setIsSigning(true);
+
+    try {
+      const unsignedXdr = await buildSupportIntent({
+        sourceAccount: visitorAddress,
+        destination: walletAddress,
+        amount,
+        assetCode: selectedAsset?.issuer ? selectedAsset.code : undefined,
+        assetIssuer: selectedAsset?.issuer ?? undefined,
+      });
+
+      const signedResult = await signTransaction(unsignedXdr, {
+        address: visitorAddress,
+        networkPassphrase: stellarConfig.networkPassphrase,
+      });
+
+      if (signedResult.error || !signedResult.signedTxXdr) {
+        throw new Error(signedResult.error || "Freighter did not return a signed transaction.");
+      }
+
+      setIsSigning(false);
+      setIsSubmitting(true);
+
+      const transactionToSubmit = TransactionBuilder.fromXDR(
+        signedResult.signedTxXdr,
+        stellarConfig.networkPassphrase
+      );
+
+      const response = await horizonServer.submitTransaction(transactionToSubmit);
+
+      setSubmittedHash(response.hash);
+      setAmount("");
+    } catch (error) {
+      setErrorMessage(mapHorizonError(error));
+    } finally {
+      setIsSigning(false);
+      setIsSubmitting(false);
+    }
+  }
 
   if (!visitorAddress) {
     return (
@@ -50,9 +159,9 @@ export function SupportPanel({ walletAddress, acceptedAssets }: SupportPanelProp
       <p className="text-xs uppercase tracking-[0.25em] text-gold">Support intent</p>
       <h2 className="mt-3 text-2xl font-semibold text-white">Ready for a real Stellar flow</h2>
       <p className="mt-4 max-w-2xl text-sm leading-7 text-sky/85">
-        This MVP intentionally stops at wallet connection and transaction preparation.
-        The next implementation step is to build and sign a {networkLabel} payment to the
-        recipient address below, then store the resulting hash through the backend.
+        Build, sign, and submit a {networkLabel} payment to the recipient address below.
+        Successful transactions are broadcast directly to Stellar Testnet and return a live
+        transaction hash from Horizon.
       </p>
       <div className="mt-6 grid gap-4 sm:grid-cols-3">
         <div className="rounded-3xl border border-white/10 bg-ink/40 p-4">
@@ -96,12 +205,30 @@ export function SupportPanel({ walletAddress, acceptedAssets }: SupportPanelProp
       </div>
 
       {/* Send Support Button */}
+      {errorMessage ? (
+        <div className="mt-4 rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+          {errorMessage}
+        </div>
+      ) : null}
+
+      {submittedHash ? (
+        <div className="mt-4 rounded-2xl border border-mint/30 bg-mint/10 px-4 py-3 text-sm text-mint">
+          Transaction submitted:{" "}
+          <span className="font-semibold text-white">{truncateHash(submittedHash)}</span>
+        </div>
+      ) : null}
+
       <button
         type="button"
-        disabled={!isValidAmount}
+        onClick={handleSendSupport}
+        disabled={!isValidAmount || isProcessing}
         className="mt-6 w-full rounded-full bg-mint px-5 py-3 text-sm font-semibold text-ink transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-mint"
       >
-        Send Support
+        {isSubmitting
+          ? "Submitting to Stellar network…"
+          : isSigning
+            ? "Waiting for Freighter signature…"
+            : "Send Support"}
       </button>
     </section>
   );
