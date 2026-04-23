@@ -430,13 +430,18 @@ export function createApp(customLogger?: Logger) {
         }),
       ]);
 
+      const formattedTotals = assetTotals.map((t) => ({
+        assetCode: t.assetCode,
+        total: t._sum.amount ? t._sum.amount.toFixed(7) : "0.0000000",
+      }));
+
+      const xlmTotal = formattedTotals.find((a) => a.assetCode === "XLM")?.total ?? "0.0000000";
+
       res.json({
         totalTransactions,
         uniqueSupporters: uniqueSupporters.length,
-        assetTotals: assetTotals.map((t) => ({
-          assetCode: t.assetCode,
-          total: t._sum.amount ? t._sum.amount.toFixed(7) : "0",
-        })),
+        totalAmountXLM: xlmTotal,
+        assetTotals: formattedTotals,
       });
     } catch (e: unknown) {
       req.log.error({ err: e }, "database error fetching profile stats");
