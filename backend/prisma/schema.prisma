@@ -34,6 +34,7 @@ model Profile {
   owner               User                 @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   acceptedAssets      AcceptedAsset[]
   supportTransactions SupportTransaction[]
+  milestones          Milestone[]
 }
 
 model AcceptedAsset {
@@ -67,5 +68,21 @@ model SupportTransaction {
 
   @@index([profileId])
   @@index([supporterId])
+}
+
+model Milestone {
+  id            String    @id @default(cuid())
+  title         String
+  description   String?
+  targetAmount  Decimal   @db.Decimal(18, 7)
+  currentAmount Decimal   @db.Decimal(18, 7) @default(0)
+  assetCode     String    @default("XLM")
+  status        String    @default("active")
+  profileId     String
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  profile       Profile   @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId])
 }
 
