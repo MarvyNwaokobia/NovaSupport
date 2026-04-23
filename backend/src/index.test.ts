@@ -211,6 +211,10 @@ async function main() {
         totalTransactions: 3,
         uniqueSupporters: 2,
         totalAmountXLM: "15.5000000",
+        assetTotals: [
+          { assetCode: "USDC", total: "2.2500000" },
+          { assetCode: "XLM", total: "15.5000000" },
+        ],
       });
     });
 

@@ -7,6 +7,12 @@ type Asset = {
   issuer?: string | null;
 };
 
+type ProfileStats = {
+  totalTransactions: number;
+  uniqueSupporters: number;
+  assetTotals: Array<{ assetCode: string; total: string }>;
+};
+
 type ProfileCardProps = {
   username: string;
   displayName: string;
@@ -18,6 +24,7 @@ type ProfileCardProps = {
   websiteUrl?: string;
   twitterHandle?: string;
   githubHandle?: string;
+  stats?: ProfileStats;
 };
 
 export function ProfileCard({
@@ -31,6 +38,7 @@ export function ProfileCard({
   websiteUrl,
   twitterHandle,
   githubHandle,
+  stats,
 }: ProfileCardProps) {
   const [copied, setCopied] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
@@ -73,6 +81,33 @@ export function ProfileCard({
             <p className="text-xs uppercase tracking-[0.3em] text-mint">@{username}</p>
             <h1 className="mt-3 text-2xl sm:text-3xl font-semibold text-white">{displayName}</h1>
             <p className="mt-4 max-w-2xl text-sm sm:text-base leading-relaxed sm:leading-7 text-sky/80">{bio}</p>
+
+            {stats && (
+              <div className="mt-6 flex flex-wrap gap-8 items-center border-t border-white/5 pt-6">
+                <div>
+                  <p className="text-xs uppercase tracking-wider text-sky/60">Total Support</p>
+                  <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
+                    {stats.assetTotals.length > 0 ? (
+                      stats.assetTotals.map((asset) => (
+                        <span key={asset.assetCode} className="text-sm font-semibold text-white">
+                          {parseFloat(asset.total).toLocaleString()} {asset.assetCode}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="text-sm font-semibold text-white">0 XLM</span>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wider text-sky/60">Supporters</p>
+                  <p className="mt-1 text-sm font-semibold text-white">{stats.uniqueSupporters}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wider text-sky/60">Transactions</p>
+                  <p className="mt-1 text-sm font-semibold text-white">{stats.totalTransactions}</p>
+                </div>
+              </div>
+            )}
 
             {/* Share Buttons */}
             <div className="mt-4 flex flex-wrap gap-2">

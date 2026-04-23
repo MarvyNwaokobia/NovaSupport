@@ -34,6 +34,9 @@ vi.mock('@/lib/stellar', () => ({
   getNetworkLabel: vi.fn(() => 'Testnet'),
   horizonServer: {
     submitTransaction: vi.fn(),
+    loadAccount: vi.fn().mockResolvedValue({
+      balances: [{ asset_type: 'native', balance: '100.0000000' }],
+    }),
   },
   stellarConfig: {
     horizonUrl: 'https://horizon-testnet.stellar.org',
