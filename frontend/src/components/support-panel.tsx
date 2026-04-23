@@ -14,6 +14,7 @@ import {
   stellarConfig,
 } from "@/lib/stellar";
 import { WalletConnect } from "./wallet-connect";
+import { TransactionResultModal } from "./transaction-result-modal";
 import { API_BASE_URL } from "@/lib/config";
 
 type Asset = {
@@ -25,12 +26,14 @@ type SupportPanelProps = {
   walletAddress: string;
   acceptedAssets?: Asset[];
   profileId?: string;
+  recipientDisplayName?: string;
 };
 
 export function SupportPanel({
   walletAddress,
   acceptedAssets,
   profileId,
+  recipientDisplayName = "Creator",
 }: SupportPanelProps) {
   const [visitorAddress, setVisitorAddress] = useState<string | null>(null);
   const [visitorBalances, setVisitorBalances] = useState<any[]>([]);
@@ -43,6 +46,11 @@ export function SupportPanel({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [submittedHash, setSubmittedHash] = useState<string | null>(null);
+  const [showResultModal, setShowResultModal] = useState(false);
+  const [lastTxDetails, setLastTxDetails] = useState<{
+    amount: string;
+    assetCode: string;
+  } | null>(null);
   const [estimatedReceived, setEstimatedReceived] = useState<string | null>(
     null,
   );
@@ -51,17 +59,31 @@ export function SupportPanel({
   const [isRecurring, setIsRecurring] = useState(false);
   const [frequency, setFrequency] = useState<"weekly" | "monthly">("monthly");
   const [recurringError, setRecurringError] = useState<string | null>(null);
+  const [message, setMessage] = useState("");
+  const [isAccountFunded, setIsAccountFunded] = useState(true);
+  const [isBalanceLoading, setIsBalanceLoading] = useState(false);
 
   const networkLabel = getNetworkLabel();
 
   const recipientAsset = acceptedAssets?.[0] || { code: "XLM" };
   const amountNum = parseFloat(amount);
+  
+  const selectedBalance = visitorBalances.find(b => 
+    paymentAsset?.code === "XLM" 
+      ? b.asset_type === "native" 
+      : b.asset_code === paymentAsset?.code && b.asset_issuer === paymentAsset?.issuer
+  );
+  const availableBalance = selectedBalance ? parseFloat(selectedBalance.balance) : 0;
+  
   const isValidAmount = amountNum > 0;
+  const isOverBalance = amountNum > availableBalance;
   const showError = amount !== "" && !isValidAmount;
   const isProcessing = isSigning || isSubmitting || isFindingPath;
 
   useEffect(() => {
     if (visitorAddress) {
+      setIsBalanceLoading(true);
+      setIsAccountFunded(true);
       horizonServer
         .loadAccount(visitorAddress)
         .then((acc) => {
@@ -83,8 +105,14 @@ export function SupportPanel({
             }
           }
         })
-        .catch((err) => {
+        .catch((err: any) => {
+          if (err?.response?.status === 404) {
+            setIsAccountFunded(false);
+          }
           console.error("Failed to load visitor account", err);
+        })
+        .finally(() => {
+          setIsBalanceLoading(false);
         });
     } else {
       setVisitorBalances([]);
@@ -209,6 +237,7 @@ export function SupportPanel({
           sourceAccount: visitorAddress,
           destination: walletAddress,
           amount,
+          memo: message || undefined,
           assetCode: recipientAsset?.issuer ? recipientAsset.code : undefined,
           assetIssuer: recipientAsset?.issuer ?? undefined,
         });
@@ -228,6 +257,7 @@ export function SupportPanel({
           sourceAmount: amount,
           destAsset,
           destAddress: walletAddress,
+          memo: message || undefined,
         });
       }
 
@@ -255,6 +285,11 @@ export function SupportPanel({
         await horizonServer.submitTransaction(transactionToSubmit);
 
       setSubmittedHash(response.hash);
+      setLastTxDetails({ 
+        amount: amount, 
+        assetCode: paymentAsset?.code || "XLM" 
+      });
+      setShowResultModal(true);
 
       // If recurring is enabled, set up the drip
       if (isRecurring && profileId) {
@@ -276,6 +311,7 @@ export function SupportPanel({
                 assetCode: recipientAsset?.code || "XLM",
                 assetIssuer: recipientAsset?.issuer,
                 frequency,
+                message: message || undefined,
               }),
             },
           );
@@ -376,9 +412,28 @@ export function SupportPanel({
 
         {/* Amount Input */}
         <div>
-          <label className="text-xs uppercase tracking-[0.2em] text-sky/70 block mb-2">
-            Amount
-          </label>
+          <div className="flex items-center justify-between mb-2">
+            <label className="text-xs uppercase tracking-[0.2em] text-sky/70">
+              Amount
+            </label>
+            {visitorAddress && (
+              <div className="text-[10px] font-medium text-sky/50">
+                {isBalanceLoading ? (
+                  <span className="animate-pulse">Fetching balance...</span>
+                ) : !isAccountFunded ? (
+                  <a 
+                    href="https://laboratory.stellar.org/#friendbot" 
+                    target="_blank" 
+                    className="text-yellow-500 hover:underline"
+                  >
+                    Account not funded (Testnet)
+                  </a>
+                ) : (
+                  <span>Available: {availableBalance.toFixed(2)} {paymentAsset?.code || "XLM"}</span>
+                )}
+              </div>
+            )}
+          </div>
           <div className="flex gap-2">
             <input
               type="number"
@@ -400,6 +455,11 @@ export function SupportPanel({
               Please enter a positive amount
             </p>
           )}
+          {isOverBalance && isValidAmount && (
+            <p className="mt-2 text-xs text-red-400">
+              Insufficient balance (Limit: {availableBalance.toFixed(7)})
+            </p>
+          )}
         </div>
 
         {estimatedReceived && (
@@ -419,6 +479,25 @@ export function SupportPanel({
             </p>
           </div>
         )}
+      </div>
+
+      {/* Message Input */}
+      <div className="mt-6">
+        <div className="flex items-center justify-between mb-2">
+          <label className="text-xs uppercase tracking-[0.2em] text-sky/70">
+            Leave a message (optional)
+          </label>
+          <span className={`text-[10px] font-medium ${message.length >= 28 ? 'text-red-400' : 'text-sky/40'}`}>
+            {message.length} / 28
+          </span>
+        </div>
+        <textarea
+          value={message}
+          onChange={(e) => setMessage(e.target.value.slice(0, 28))}
+          placeholder="e.g. Keep up the great work!"
+          rows={2}
+          className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-sky/30 focus:border-mint/50 focus:outline-none resize-none"
+        />
       </div>
 
       {/* Recurring Support Toggle */}
@@ -480,33 +559,11 @@ export function SupportPanel({
         </div>
       )}
 
-      {submittedHash && (
-        <div className="mt-4 rounded-2xl border border-mint/30 bg-mint/10 px-4 py-3 text-sm text-mint">
-          {isRecurring && !recurringError ? (
-            <>
-              Drip activated! You&apos;ll support this creator every{" "}
-              {frequency === "weekly" ? "week" : "month"}.
-              <br />
-              Transaction:{" "}
-              <span className="font-semibold text-white">
-                {truncateHash(submittedHash)}
-              </span>
-            </>
-          ) : (
-            <>
-              Transaction submitted:{" "}
-              <span className="font-semibold text-white">
-                {truncateHash(submittedHash)}
-              </span>
-            </>
-          )}
-        </div>
-      )}
 
       <button
         type="button"
         onClick={handleSendSupport}
-        disabled={!isValidAmount || isProcessing || noPathFound}
+        disabled={!isValidAmount || isProcessing || noPathFound || isOverBalance || !isAccountFunded}
         className="mt-6 w-full rounded-full bg-mint px-5 py-3 text-sm font-semibold text-ink transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-mint"
       >
         {isSubmitting
@@ -517,6 +574,23 @@ export function SupportPanel({
               ? "Finding best exchange path…"
               : "Send Support"}
       </button>
+
+      {/* Transaction Result Modal */}
+      <TransactionResultModal
+        isOpen={showResultModal}
+        onClose={() => {
+          setShowResultModal(false);
+          setAmount("");
+          setMessage("");
+          setSubmittedHash(null);
+          setErrorMessage(null);
+          setRecurringError(null);
+        }}
+        txHash={submittedHash}
+        amount={lastTxDetails?.amount || ""}
+        assetCode={lastTxDetails?.assetCode || "XLM"}
+        recipientDisplayName={recipientDisplayName}
+      />
     </section>
   );
 }
