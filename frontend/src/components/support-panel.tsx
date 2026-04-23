@@ -74,10 +74,13 @@ export function SupportPanel({
           if (xlm) {
             setPaymentAsset({ code: "XLM" });
           } else if (balances.length > 0) {
-            setPaymentAsset({
-              code: balances[0].asset_code,
-              issuer: balances[0].asset_issuer,
-            });
+            const firstBalance = balances[0] as any;
+            if (firstBalance.asset_type !== "native") {
+              setPaymentAsset({
+                code: firstBalance.asset_code,
+                issuer: firstBalance.asset_issuer,
+              });
+            }
           }
         })
         .catch((err) => {
