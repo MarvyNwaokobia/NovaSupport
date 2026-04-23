@@ -271,6 +271,7 @@ export default async function ProfilePage({ params }: PageProps) {
             walletAddress={profile.walletAddress}
             acceptedAssets={profile.acceptedAssets}
             profileId={profile.id}
+            recipientDisplayName={profile.displayName}
           />
 
           {leaderboard.length > 0 && (

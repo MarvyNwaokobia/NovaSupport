@@ -14,6 +14,7 @@ import {
   stellarConfig,
 } from "@/lib/stellar";
 import { WalletConnect } from "./wallet-connect";
+import { TransactionResultModal } from "./transaction-result-modal";
 import { API_BASE_URL } from "@/lib/config";
 
 type Asset = {
@@ -25,12 +26,14 @@ type SupportPanelProps = {
   walletAddress: string;
   acceptedAssets?: Asset[];
   profileId?: string;
+  recipientDisplayName?: string;
 };
 
 export function SupportPanel({
   walletAddress,
   acceptedAssets,
   profileId,
+  recipientDisplayName = "Creator",
 }: SupportPanelProps) {
   const [visitorAddress, setVisitorAddress] = useState<string | null>(null);
   const [visitorBalances, setVisitorBalances] = useState<any[]>([]);
@@ -43,6 +46,11 @@ export function SupportPanel({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [submittedHash, setSubmittedHash] = useState<string | null>(null);
+  const [showResultModal, setShowResultModal] = useState(false);
+  const [lastTxDetails, setLastTxDetails] = useState<{
+    amount: string;
+    assetCode: string;
+  } | null>(null);
   const [estimatedReceived, setEstimatedReceived] = useState<string | null>(
     null,
   );
@@ -255,6 +263,11 @@ export function SupportPanel({
         await horizonServer.submitTransaction(transactionToSubmit);
 
       setSubmittedHash(response.hash);
+      setLastTxDetails({ 
+        amount: amount, 
+        assetCode: paymentAsset?.code || "XLM" 
+      });
+      setShowResultModal(true);
 
       // If recurring is enabled, set up the drip
       if (isRecurring && profileId) {
@@ -517,6 +530,22 @@ export function SupportPanel({
               ? "Finding best exchange path…"
               : "Send Support"}
       </button>
+
+      {/* Transaction Result Modal */}
+      <TransactionResultModal
+        isOpen={showResultModal}
+        onClose={() => {
+          setShowResultModal(false);
+          setAmount("");
+          setSubmittedHash(null);
+          setErrorMessage(null);
+          setRecurringError(null);
+        }}
+        txHash={submittedHash}
+        amount={lastTxDetails?.amount || ""}
+        assetCode={lastTxDetails?.assetCode || "XLM"}
+        recipientDisplayName={recipientDisplayName}
+      />
     </section>
   );
 }
