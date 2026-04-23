@@ -19,9 +19,7 @@ import {
 } from "./auth.js";
 import multer from "multer";
 import { createClient } from "@supabase/supabase-js";
-import { sendEmail } from "./mailer.js";
-import { contributionReceivedEmail } from "./emails/contribution-received.js";
-import { contributionSentEmail } from "./emails/contribution-sent.js";
+import { sendSupportReceivedEmail } from "./services/email.js";
 
 // Extend Express Request to include auth context
 declare global {
@@ -1123,29 +1121,28 @@ export function createApp(customLogger?: Logger) {
     const grouped = await prisma.supportTransaction.groupBy({
       by: ["supporterAddress", "assetCode"],
       where: {
-        recipientAddress: profile.walletAddress,
-        status: "SUCCESS",
+        profileId: profile.id,
+        status: { not: "failed" },
         supporterAddress: { not: null },
       },
       _sum: { amount: true },
+      _count: true,
       orderBy: {
         _sum: {
           amount: "desc",
         },
       },
-      take: 5,
+      take: 10,
     });
 
-    const leaderboard = grouped
-      .filter((entry) => entry.supporterAddress)
-      .map((entry, index) => ({
-        rank: index + 1,
-        supporterAddress: entry.supporterAddress as string,
-        totalAmount: entry._sum.amount?.toString() ?? "0",
-        assetCode: entry.assetCode,
-      }));
+    const leaderboard = grouped.map((entry) => ({
+      supporterAddress: entry.supporterAddress as string,
+      assetCode: entry.assetCode,
+      totalAmount: entry._sum.amount?.toString() ?? "0",
+      txCount: entry._count,
+    }));
 
-    return res.json({ leaderboard });
+    return res.json(leaderboard);
   });
 
   /**
@@ -1236,57 +1233,28 @@ export function createApp(customLogger?: Logger) {
         data: parsed.data,
       });
 
-      // Notify creator and supporter (async, best-effort)
+      // Notify creator (async, best-effort)
       (async () => {
         try {
           const recipientProfile = await prisma.profile.findUnique({
             where: { id: supportRecord.profileId },
-            select: { email: true, displayName: true, notifyOnSupport: true },
+            include: { owner: true },
           });
 
-          if (
-            recipientProfile?.email &&
-            recipientProfile.notifyOnSupport !== false
-          ) {
-            const mail = contributionReceivedEmail({
-              creatorName: recipientProfile.displayName,
-              supporterAddress: supportRecord.supporterAddress ?? "Anonymous",
+          if (recipientProfile?.owner?.email) {
+            sendSupportReceivedEmail({
+              to: recipientProfile.owner.email,
+              fromAddress: supportRecord.supporterAddress ?? "Anonymous",
               amount: supportRecord.amount.toString(),
               assetCode: supportRecord.assetCode,
-              message: supportRecord.message ?? undefined,
-            });
-            sendEmail({ to: recipientProfile.email, ...mail }).catch((err) => {
+              message: supportRecord.message,
+              txHash: supportRecord.txHash,
+            }).catch((err) => {
               logger.error(
                 { err, profileId: supportRecord.profileId },
                 "Failed to send contribution received email",
               );
             });
-          }
-
-          if (supportRecord.supporterAddress) {
-            const supporterProfile = await prisma.profile.findFirst({
-              where: { walletAddress: supportRecord.supporterAddress },
-              select: { email: true },
-            });
-
-            if (supporterProfile?.email) {
-              const mail = contributionSentEmail({
-                recipientName:
-                  recipientProfile?.displayName ??
-                  supportRecord.recipientAddress,
-                amount: supportRecord.amount.toString(),
-                assetCode: supportRecord.assetCode,
-                txHash: supportRecord.txHash,
-              });
-              sendEmail({ to: supporterProfile.email, ...mail }).catch(
-                (err) => {
-                  logger.error(
-                    { err, txHash: supportRecord.txHash },
-                    "Failed to send contribution sent email",
-                  );
-                },
-              );
-            }
           }
         } catch (err) {
           logger.error(
@@ -1743,6 +1711,88 @@ export function createApp(customLogger?: Logger) {
     } catch {
       return sendError(res, 500, "Internal server error");
     }
+  });
+
+  app.get("/profiles/:username/analytics/timeseries", async (req, res) => {
+    const { username } = req.params;
+    const period = (req.query.period as string) || "daily";
+    const assetCode = req.query.assetCode as string | undefined;
+
+    const to = new Date(req.query.to as string || new Date().toISOString());
+    const from = new Date(
+      req.query.from as string ||
+        new Date(to.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString()
+    );
+
+    if (isNaN(to.getTime()) || isNaN(from.getTime())) {
+      return res.status(400).json({ error: "Invalid from or to date" });
+    }
+
+    const profile = await prisma.profile.findUnique({
+      where: { username },
+    });
+
+    if (!profile) {
+      return sendError(res, 404, "Profile not found");
+    }
+
+    let results;
+    try {
+      if (period === "monthly") {
+        results = await prisma.$queryRaw\`
+          SELECT
+            DATE_TRUNC('month', "createdAt") as date,
+            SUM(amount) as total,
+            COUNT(*) as "txCount"
+          FROM "SupportTransaction"
+          WHERE "profileId" = \${profile.id}
+            AND "status" != 'failed'
+            AND "createdAt" >= \${from}
+            AND "createdAt" <= \${to}
+            \${assetCode ? Prisma.sql\`AND "assetCode" = \${assetCode}\` : Prisma.empty}
+          GROUP BY DATE_TRUNC('month', "createdAt")
+          ORDER BY date ASC
+        \`;
+      } else if (period === "weekly") {
+        results = await prisma.$queryRaw\`
+          SELECT
+            DATE_TRUNC('week', "createdAt") as date,
+            SUM(amount) as total,
+            COUNT(*) as "txCount"
+          FROM "SupportTransaction"
+          WHERE "profileId" = \${profile.id}
+            AND "status" != 'failed'
+            AND "createdAt" >= \${from}
+            AND "createdAt" <= \${to}
+            \${assetCode ? Prisma.sql\`AND "assetCode" = \${assetCode}\` : Prisma.empty}
+          GROUP BY DATE_TRUNC('week', "createdAt")
+          ORDER BY date ASC
+        \`;
+      } else {
+        results = await prisma.$queryRaw\`
+          SELECT
+            DATE_TRUNC('day', "createdAt") as date,
+            SUM(amount) as total,
+            COUNT(*) as "txCount"
+          FROM "SupportTransaction"
+          WHERE "profileId" = \${profile.id}
+            AND "status" != 'failed'
+            AND "createdAt" >= \${from}
+            AND "createdAt" <= \${to}
+            \${assetCode ? Prisma.sql\`AND "assetCode" = \${assetCode}\` : Prisma.empty}
+          GROUP BY DATE_TRUNC('day', "createdAt")
+          ORDER BY date ASC
+        \`;
+      }
+    } catch (err) {
+      req.log.error({ err }, "Failed to fetch analytics");
+      return res.status(500).json({ error: "Internal server error" });
+    }
+
+    const { fillGaps } = await import("./analytics.js");
+    const formatted = fillGaps(results as any[], period, from, to);
+
+    return res.json(formatted);
   });
 
   return app;
