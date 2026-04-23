@@ -108,3 +108,59 @@ export async function buildSupportIntent({
 
   return transaction.build().toXDR();
 }
+
+export type PathPaymentIntentInput = {
+  sourceAccount: string;
+  sourceAsset: Asset;
+  sourceAmount: string;
+  destAsset: Asset;
+  destAddress: string;
+  slippageTolerance?: number; // default 0.02
+  memo?: string;
+};
+
+export async function buildPathPaymentIntent({
+  sourceAccount,
+  sourceAsset,
+  sourceAmount,
+  destAsset,
+  destAddress,
+  slippageTolerance = 0.02,
+  memo
+}: PathPaymentIntentInput) {
+  const paths = await horizonServer.strictSendPaths(sourceAsset, sourceAmount, [destAsset]).call();
+
+  if (paths.records.length === 0) {
+    throw new Error(`No DEX path found from ${sourceAsset.getCode()} to ${destAsset.getCode()}`);
+  }
+
+  const bestPath = paths.records[0];
+  const estimatedDestAmount = bestPath.destination_amount;
+  const destMin = (parseFloat(estimatedDestAmount) * (1 - slippageTolerance)).toFixed(7);
+
+  const account = await horizonServer.loadAccount(sourceAccount);
+
+  const transaction = new TransactionBuilder(account, {
+    fee: BASE_FEE,
+    networkPassphrase: stellarConfig.networkPassphrase
+  })
+    .addOperation(
+      Operation.pathPaymentStrictSend({
+        sendAsset: sourceAsset,
+        sendAmount: sourceAmount,
+        destination: destAddress,
+        destAsset: destAsset,
+        destMin: destMin,
+        path: bestPath.path.map((p: any) => 
+          p.asset_type === 'native' ? Asset.native() : new Asset(p.asset_code, p.asset_issuer)
+        )
+      })
+    )
+    .setTimeout(30);
+
+  if (memo) {
+    transaction.addMemo(Memo.text(memo));
+  }
+
+  return transaction.build().toXDR();
+}
