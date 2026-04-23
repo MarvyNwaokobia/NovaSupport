@@ -8,6 +8,7 @@ import { StrKey, Horizon } from "@stellar/stellar-sdk";
 import swaggerJsdoc from "swagger-jsdoc";
 import swaggerUi from "swagger-ui-express";
 import { prisma } from "./db.js";
+import { Prisma } from "@prisma/client";
 import { logger } from "./logger.js";
 import {
   generateChallenge,
@@ -1739,50 +1740,50 @@ export function createApp(customLogger?: Logger) {
     let results;
     try {
       if (period === "monthly") {
-        results = await prisma.$queryRaw\`
+        results = await prisma.$queryRaw`
           SELECT
             DATE_TRUNC('month', "createdAt") as date,
             SUM(amount) as total,
             COUNT(*) as "txCount"
           FROM "SupportTransaction"
-          WHERE "profileId" = \${profile.id}
+          WHERE "profileId" = ${profile.id}
             AND "status" != 'failed'
-            AND "createdAt" >= \${from}
-            AND "createdAt" <= \${to}
-            \${assetCode ? Prisma.sql\`AND "assetCode" = \${assetCode}\` : Prisma.empty}
+            AND "createdAt" >= ${from}
+            AND "createdAt" <= ${to}
+            ${assetCode ? Prisma.sql`AND "assetCode" = ${assetCode}` : Prisma.empty}
           GROUP BY DATE_TRUNC('month', "createdAt")
           ORDER BY date ASC
-        \`;
+        `;
       } else if (period === "weekly") {
-        results = await prisma.$queryRaw\`
+        results = await prisma.$queryRaw`
           SELECT
             DATE_TRUNC('week', "createdAt") as date,
             SUM(amount) as total,
             COUNT(*) as "txCount"
           FROM "SupportTransaction"
-          WHERE "profileId" = \${profile.id}
+          WHERE "profileId" = ${profile.id}
             AND "status" != 'failed'
-            AND "createdAt" >= \${from}
-            AND "createdAt" <= \${to}
-            \${assetCode ? Prisma.sql\`AND "assetCode" = \${assetCode}\` : Prisma.empty}
+            AND "createdAt" >= ${from}
+            AND "createdAt" <= ${to}
+            ${assetCode ? Prisma.sql`AND "assetCode" = ${assetCode}` : Prisma.empty}
           GROUP BY DATE_TRUNC('week', "createdAt")
           ORDER BY date ASC
-        \`;
+        `;
       } else {
-        results = await prisma.$queryRaw\`
+        results = await prisma.$queryRaw`
           SELECT
             DATE_TRUNC('day', "createdAt") as date,
             SUM(amount) as total,
             COUNT(*) as "txCount"
           FROM "SupportTransaction"
-          WHERE "profileId" = \${profile.id}
+          WHERE "profileId" = ${profile.id}
             AND "status" != 'failed'
-            AND "createdAt" >= \${from}
-            AND "createdAt" <= \${to}
-            \${assetCode ? Prisma.sql\`AND "assetCode" = \${assetCode}\` : Prisma.empty}
+            AND "createdAt" >= ${from}
+            AND "createdAt" <= ${to}
+            ${assetCode ? Prisma.sql`AND "assetCode" = ${assetCode}` : Prisma.empty}
           GROUP BY DATE_TRUNC('day', "createdAt")
           ORDER BY date ASC
-        \`;
+        `;
       }
     } catch (err) {
       req.log.error({ err }, "Failed to fetch analytics");

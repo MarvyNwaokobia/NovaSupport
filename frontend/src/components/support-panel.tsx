@@ -559,28 +559,6 @@ export function SupportPanel({
         </div>
       )}
 
-      {submittedHash && (
-        <div className="mt-4 rounded-2xl border border-mint/30 bg-mint/10 px-4 py-3 text-sm text-mint">
-          {isRecurring && !recurringError ? (
-            <>
-              Drip activated! You&apos;ll support this creator every{" "}
-              {frequency === "weekly" ? "week" : "month"}.
-              <br />
-              Transaction:{" "}
-              <span className="font-semibold text-white">
-                {truncateHash(submittedHash)}
-              </span>
-            </>
-          ) : (
-            <>
-              Transaction submitted:{" "}
-              <span className="font-semibold text-white">
-                {truncateHash(submittedHash)}
-              </span>
-            </>
-          )}
-        </div>
-      )}
 
       <button
         type="button"

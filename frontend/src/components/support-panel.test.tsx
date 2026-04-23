@@ -84,7 +84,7 @@ describe('SupportPanel', () => {
     fireEvent.change(screen.getByPlaceholderText('0.00'), { target: { value: '5' } });
     await waitFor(() => expect(screen.getByRole('button', { name: /Send Support/i })).not.toBeDisabled());
     fireEvent.click(screen.getByRole('button', { name: /Send Support/i }));
-    await waitFor(() => expect(screen.getByText(/Transaction submitted:/)).toBeInTheDocument(), { timeout: 3000 });
+    await waitFor(() => expect(screen.getByText(/Support Sent!/)).toBeInTheDocument(), { timeout: 3000 });
     expect(screen.getByText('12345678...90abcdef')).toBeInTheDocument();
   });
 
