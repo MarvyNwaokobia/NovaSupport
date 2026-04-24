@@ -1,5 +1,10 @@
 #![no_std]
-use soroban_sdk::{contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env, String};
+use soroban_sdk::{
+    contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env, String,
+};
+
+const LEDGERS_TO_LIVE: u32 = 100_000;
+const LEDGERS_THRESHOLD: u32 = 50_000;
 
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
@@ -39,7 +44,13 @@ pub struct SupportPageContract;
 impl SupportPageContract {
     pub fn initialize(e: Env, admin: Address) {
         e.storage().persistent().set(&DataKey::Admin, &admin);
+        e.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Admin, LEDGERS_THRESHOLD, LEDGERS_TO_LIVE);
         e.storage().persistent().set(&DataKey::Paused, &false);
+        e.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Paused, LEDGERS_THRESHOLD, LEDGERS_TO_LIVE);
     }
 
     pub fn pause(e: Env, caller: Address) -> Result<(), Error> {
@@ -53,6 +64,9 @@ impl SupportPageContract {
             return Err(Error::Unauthorized);
         }
         e.storage().persistent().set(&DataKey::Paused, &true);
+        e.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Paused, LEDGERS_THRESHOLD, LEDGERS_TO_LIVE);
         Ok(())
     }
 
@@ -67,6 +81,9 @@ impl SupportPageContract {
             return Err(Error::Unauthorized);
         }
         e.storage().persistent().set(&DataKey::Paused, &false);
+        e.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Paused, LEDGERS_THRESHOLD, LEDGERS_TO_LIVE);
         Ok(())
     }
 
@@ -102,18 +119,37 @@ impl SupportPageContract {
         let ct: u32 = st.get(&DataKey::SupportCount).unwrap_or(0);
         let nct = ct + 1;
         st.set(&DataKey::SupportCount, &nct);
+        st.extend_ttl(&DataKey::SupportCount, LEDGERS_THRESHOLD, LEDGERS_TO_LIVE);
 
         let rct: u32 = st.get(&DataKey::RecipientCount(r.clone())).unwrap_or(0);
         let nrct = rct + 1;
         st.set(&DataKey::RecipientCount(r.clone()), &nrct);
+        st.extend_ttl(
+            &DataKey::RecipientCount(r.clone()),
+            LEDGERS_THRESHOLD,
+            LEDGERS_TO_LIVE,
+        );
 
         let total: i128 = st.get(&DataKey::RecipientTotal(r.clone())).unwrap_or(0);
         st.set(&DataKey::RecipientTotal(r.clone()), &(total + o));
+        st.extend_ttl(
+            &DataKey::RecipientTotal(r.clone()),
+            LEDGERS_THRESHOLD,
+            LEDGERS_TO_LIVE,
+        );
 
         let asset_total: i128 = st
             .get(&DataKey::TotalByAsset(r.clone(), asset.clone()))
             .unwrap_or(0);
-        st.set(&DataKey::TotalByAsset(r.clone(), asset.clone()), &(asset_total + o));
+        st.set(
+            &DataKey::TotalByAsset(r.clone(), asset.clone()),
+            &(asset_total + o),
+        );
+        st.extend_ttl(
+            &DataKey::TotalByAsset(r.clone(), asset.clone()),
+            LEDGERS_THRESHOLD,
+            LEDGERS_TO_LIVE,
+        );
 
         let tt = symbol_short!("support");
         let ev = SupportEvent {
@@ -154,22 +190,27 @@ impl SupportPageContract {
 
         // Deduct from TotalByAsset storage
         st.set(&key, &(balance - amount));
+        st.extend_ttl(&key, LEDGERS_THRESHOLD, LEDGERS_TO_LIVE);
 
         // Emit a withdraw event
-        e.events().publish(
-            (symbol_short!("withdraw"), caller, asset),
-            amount,
-        );
+        e.events()
+            .publish((symbol_short!("withdraw"), caller, asset), amount);
 
         Ok(())
     }
 
     pub fn support_count(e: Env) -> u32 {
-        e.storage().persistent().get(&DataKey::SupportCount).unwrap_or(0)
+        e.storage()
+            .persistent()
+            .get(&DataKey::SupportCount)
+            .unwrap_or(0)
     }
 
     pub fn recipient_count(e: Env, r: Address) -> u32 {
-        e.storage().persistent().get(&DataKey::RecipientCount(r)).unwrap_or(0)
+        e.storage()
+            .persistent()
+            .get(&DataKey::RecipientCount(r))
+            .unwrap_or(0)
     }
 
     pub fn get_total_by_asset(e: Env, r: Address, asset: Address) -> i128 {
@@ -195,7 +236,9 @@ mod test {
         let supporter = Address::generate(&e);
         let recipient = Address::generate(&e);
         let admin = Address::generate(&e);
-        let asset = e.register_stellar_asset_contract_v2(admin.clone()).address();
+        let asset = e
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
         let token_admin = soroban_sdk::token::StellarAssetClient::new(&e, &asset);
         token_admin.mint(&supporter, &10_000_000_i128);
 
@@ -216,7 +259,10 @@ mod test {
             &String::from_str(&e, "Second support"),
         );
 
-        assert_eq!(client.get_total_by_asset(&recipient, &asset), 8_000_000_i128);
+        assert_eq!(
+            client.get_total_by_asset(&recipient, &asset),
+            8_000_000_i128
+        );
     }
 
     #[test]
@@ -230,9 +276,13 @@ mod test {
         let recipient_one = Address::generate(&e);
         let recipient_two = Address::generate(&e);
         let admin = Address::generate(&e);
-        let asset_one = e.register_stellar_asset_contract_v2(admin.clone()).address();
-        let asset_two = e.register_stellar_asset_contract_v2(admin.clone()).address();
-        
+        let asset_one = e
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
+        let asset_two = e
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
+
         let token_admin_one = soroban_sdk::token::StellarAssetClient::new(&e, &asset_one);
         let token_admin_two = soroban_sdk::token::StellarAssetClient::new(&e, &asset_two);
         token_admin_one.mint(&supporter, &10_000_000_i128);
@@ -255,8 +305,14 @@ mod test {
             &String::from_str(&e, "Support two"),
         );
 
-        assert_eq!(client.get_total_by_asset(&recipient_one, &asset_one), 4_000_000_i128);
-        assert_eq!(client.get_total_by_asset(&recipient_two, &asset_two), 7_000_000_i128);
+        assert_eq!(
+            client.get_total_by_asset(&recipient_one, &asset_one),
+            4_000_000_i128
+        );
+        assert_eq!(
+            client.get_total_by_asset(&recipient_two, &asset_two),
+            7_000_000_i128
+        );
     }
 
     #[test]
@@ -269,8 +325,10 @@ mod test {
         let supporter = Address::generate(&e);
         let recipient = Address::generate(&e);
         let admin = Address::generate(&e);
-        let asset = e.register_stellar_asset_contract_v2(admin.clone()).address();
-        
+        let asset = e
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
+
         let token_admin = soroban_sdk::token::StellarAssetClient::new(&e, &asset);
         token_admin.mint(&supporter, &10_000_i128);
 
@@ -290,7 +348,7 @@ mod test {
         client.withdraw(&recipient, &recipient, &asset, &5_000_i128);
 
         assert_eq!(client.get_total_by_asset(&recipient, &asset), 5_000_i128);
-        
+
         // Verify token balance of recipient
         let token_client = soroban_sdk::token::Client::new(&e, &asset);
         assert_eq!(token_client.balance(&recipient), 5_000_i128);
@@ -308,8 +366,10 @@ mod test {
         let recipient = Address::generate(&e);
         let attacker = Address::generate(&e);
         let admin = Address::generate(&e);
-        let asset = e.register_stellar_asset_contract_v2(admin.clone()).address();
-        
+        let asset = e
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
+
         let token_admin = soroban_sdk::token::StellarAssetClient::new(&e, &asset);
         token_admin.mint(&supporter, &10_000_i128);
 
@@ -338,7 +398,9 @@ mod test {
         let recipient_one = Address::generate(&e);
         let recipient_two = Address::generate(&e);
         let admin = Address::generate(&e);
-        let asset = e.register_stellar_asset_contract_v2(admin.clone()).address();
+        let asset = e
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
         let token_admin = soroban_sdk::token::StellarAssetClient::new(&e, &asset);
         token_admin.mint(&supporter_one, &10_000_i128);
         token_admin.mint(&supporter_two, &10_000_i128);
@@ -387,7 +449,9 @@ mod test {
         let admin = Address::generate(&e);
         let supporter = Address::generate(&e);
         let recipient = Address::generate(&e);
-        let asset = e.register_stellar_asset_contract_v2(admin.clone()).address();
+        let asset = e
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
         let token_admin = soroban_sdk::token::StellarAssetClient::new(&e, &asset);
         token_admin.mint(&supporter, &10_000_i128);
 
@@ -414,7 +478,9 @@ mod test {
         let admin = Address::generate(&e);
         let supporter = Address::generate(&e);
         let recipient = Address::generate(&e);
-        let asset = e.register_stellar_asset_contract_v2(admin.clone()).address();
+        let asset = e
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
         let token_admin = soroban_sdk::token::StellarAssetClient::new(&e, &asset);
         token_admin.mint(&supporter, &10_000_i128);
 
@@ -459,8 +525,10 @@ mod test {
         let supporter = Address::generate(&e);
         let recipient = Address::generate(&e);
         let admin = Address::generate(&e);
-        let asset = e.register_stellar_asset_contract_v2(admin.clone()).address();
-        
+        let asset = e
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
+
         let token_admin = soroban_sdk::token::StellarAssetClient::new(&e, &asset);
         token_admin.mint(&supporter, &10_000_i128);
 
