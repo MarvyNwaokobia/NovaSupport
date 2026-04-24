@@ -1340,8 +1340,36 @@ export function createApp(customLogger?: Logger) {
 
       let supportRecord;
       try {
-        supportRecord = await prisma.supportTransaction.create({
-          data: parsed.data,
+        supportRecord = await prisma.$transaction(async (tx: any) => {
+          const record = await tx.supportTransaction.create({
+            data: parsed.data,
+          });
+
+          const milestones = await tx.milestone.findMany({
+            where: {
+              profileId: parsed.data.profileId,
+              assetCode: parsed.data.assetCode,
+              status: "active",
+            },
+          });
+
+          for (const milestone of milestones) {
+            const updated = await tx.milestone.update({
+              where: { id: milestone.id },
+              data: {
+                currentAmount: { increment: parsed.data.amount },
+              },
+            });
+
+            if (Number(updated.currentAmount) >= Number(updated.targetAmount)) {
+              await tx.milestone.update({
+                where: { id: milestone.id },
+                data: { status: "reached" },
+              });
+            }
+          }
+
+          return record;
         });
       } catch (error: unknown) {
         if (
