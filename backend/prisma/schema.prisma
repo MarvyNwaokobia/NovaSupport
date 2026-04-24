@@ -24,6 +24,11 @@ model Profile {
   displayName         String
   bio                 String
   avatarUrl           String?
+  email               String?              @unique
+  notifyOnSupport     Boolean              @default(true)
+  websiteUrl          String?
+  twitterHandle       String?
+  githubHandle        String?
   walletAddress       String
   ownerId             String
   createdAt           DateTime             @default(now())
@@ -32,6 +37,7 @@ model Profile {
   acceptedAssets      AcceptedAsset[]
   supportTransactions SupportTransaction[]
   recurringSupports   RecurringSupport[]
+  milestones          Milestone[]
   webhooks            Webhook[]
 }
 
@@ -68,6 +74,21 @@ model SupportTransaction {
   @@index([supporterId])
 }
 
+model Milestone {
+  id            String    @id @default(cuid())
+  title         String
+  description   String?
+  targetAmount  Decimal   @db.Decimal(18, 7)
+  currentAmount Decimal   @db.Decimal(18, 7) @default(0)
+  assetCode     String    @default("XLM")
+  status        String    @default("active")
+  profileId     String
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  profile       Profile   @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId])
+}
 
 model Webhook {
   id        String   @id @default(cuid())
@@ -76,6 +97,7 @@ model Webhook {
   active    Boolean  @default(true)
   profileId String
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
   profile   Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
 
   @@index([profileId])
