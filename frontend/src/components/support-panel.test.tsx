@@ -88,6 +88,53 @@ describe('SupportPanel', () => {
     expect(screen.getByText('12345678...90abcdef')).toBeInTheDocument();
   });
 
+  it('shows "Waiting for Freighter signature…" while signing prompt is open', async () => {
+    vi.mocked(buildSupportIntent).mockResolvedValue('unsigned-xdr');
+    // Never resolves — simulates Freighter prompt staying open
+    vi.mocked(signTransaction).mockReturnValue(new Promise(() => {}));
+
+    render(<SupportPanel {...mockProps} />);
+    await waitFor(() => expect(screen.getByPlaceholderText('0.00')).toBeInTheDocument());
+    fireEvent.change(screen.getByPlaceholderText('0.00'), { target: { value: '5' } });
+    await waitFor(() => expect(screen.getByRole('button', { name: /Send Support/i })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole('button', { name: /Send Support/i }));
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /Waiting for Freighter signature/i })).toBeDisabled(),
+    );
+  });
+
+  it('shows a readable error when the user rejects the transaction in Freighter', async () => {
+    vi.mocked(buildSupportIntent).mockResolvedValue('unsigned-xdr');
+    vi.mocked(signTransaction).mockRejectedValue(new Error('User declined signing the transaction'));
+
+    render(<SupportPanel {...mockProps} />);
+    await waitFor(() => expect(screen.getByPlaceholderText('0.00')).toBeInTheDocument());
+    fireEvent.change(screen.getByPlaceholderText('0.00'), { target: { value: '5' } });
+    await waitFor(() => expect(screen.getByRole('button', { name: /Send Support/i })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole('button', { name: /Send Support/i }));
+    await waitFor(() =>
+      expect(screen.getByText('You declined the transaction in Freighter.')).toBeInTheDocument(),
+      { timeout: 3000 },
+    );
+  });
+
+  it('shows a readable error when Freighter is not installed', async () => {
+    vi.mocked(buildSupportIntent).mockResolvedValue('unsigned-xdr');
+    vi.mocked(signTransaction).mockRejectedValue(new Error('Freighter is not installed'));
+
+    render(<SupportPanel {...mockProps} />);
+    await waitFor(() => expect(screen.getByPlaceholderText('0.00')).toBeInTheDocument());
+    fireEvent.change(screen.getByPlaceholderText('0.00'), { target: { value: '5' } });
+    await waitFor(() => expect(screen.getByRole('button', { name: /Send Support/i })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole('button', { name: /Send Support/i }));
+    await waitFor(() =>
+      expect(
+        screen.getByText(/Freighter is not installed/i),
+      ).toBeInTheDocument(),
+      { timeout: 3000 },
+    );
+  });
+
   it('shows a readable Horizon error message', async () => {
     vi.mocked(buildSupportIntent).mockResolvedValue('unsigned-xdr');
     vi.mocked(signTransaction).mockResolvedValue({
@@ -104,6 +151,21 @@ describe('SupportPanel', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: /Send Support/i })).not.toBeDisabled());
     fireEvent.click(screen.getByRole('button', { name: /Send Support/i }));
     await waitFor(() => expect(screen.getByText('Transaction expired')).toBeInTheDocument(), { timeout: 3000 });
+  });
+
+  it('button is disabled while the signing prompt is open', async () => {
+    vi.mocked(buildSupportIntent).mockResolvedValue('unsigned-xdr');
+    vi.mocked(signTransaction).mockReturnValue(new Promise(() => {}));
+
+    render(<SupportPanel {...mockProps} />);
+    await waitFor(() => expect(screen.getByPlaceholderText('0.00')).toBeInTheDocument());
+    fireEvent.change(screen.getByPlaceholderText('0.00'), { target: { value: '5' } });
+    await waitFor(() => expect(screen.getByRole('button', { name: /Send Support/i })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole('button', { name: /Send Support/i }));
+    await waitFor(() => {
+      const btn = screen.getByRole('button', { name: /Waiting for Freighter signature/i });
+      expect(btn).toBeDisabled();
+    });
   });
 
   it('renders payment asset selector when connected', async () => {
