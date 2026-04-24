@@ -406,13 +406,13 @@ export function createApp(customLogger?: Logger) {
 
         let sorted = profiles;
         if (sort === "most_supported") {
-          sorted = profiles.sort((a, b) => {
+          sorted = profiles.sort((a: any, b: any) => {
             const aTotal = a.supportTransactions.reduce(
-              (sum, tx) => sum + Number(tx.amount),
+              (sum: number, tx: any) => sum + Number(tx.amount),
               0,
             );
             const bTotal = b.supportTransactions.reduce(
-              (sum, tx) => sum + Number(tx.amount),
+              (sum: number, tx: any) => sum + Number(tx.amount),
               0,
             );
             return bTotal - aTotal;
@@ -579,34 +579,42 @@ export function createApp(customLogger?: Logger) {
         return sendError(res, 404, "Profile not found");
       }
 
-      const where = { profileId: profile.id, status: "SUCCESS" };
+      const profileId = profile.id;
+      const where = { profileId, status: { not: "failed" } };
 
-      const [totalTransactions, uniqueSupporters, assetTotals] = await Promise.all([
-        prisma.supportTransaction.count({ where }),
+      const [uniqueSupportersList, assetGroups, aggregates] = await Promise.all([
         prisma.supportTransaction.findMany({
-          where,
-          select: { supporterAddress: true },
+          where: { ...where, supporterAddress: { not: null } },
           distinct: ["supporterAddress"],
+          select: { supporterAddress: true },
         }),
         prisma.supportTransaction.groupBy({
-          by: ["assetCode"],
+          by: ["assetCode", "assetIssuer"],
           where,
           _sum: { amount: true },
+          _count: true,
+        }),
+        prisma.supportTransaction.aggregate({
+          where,
+          _min: { createdAt: true },
+          _max: { createdAt: true },
         }),
       ]);
 
-      const formattedTotals = assetTotals.map((t) => ({
-        assetCode: t.assetCode,
-        total: t._sum.amount ? t._sum.amount.toFixed(7) : "0.0000000",
-      }));
+      const totalTransactions = assetGroups.reduce((acc: number, g: any) => acc + g._count, 0);
 
-      const xlmTotal = formattedTotals.find((a) => a.assetCode === "XLM")?.total ?? "0.0000000";
+      const totalByAsset = assetGroups.map((g: any) => ({
+        assetCode: g.assetCode,
+        assetIssuer: g.assetIssuer,
+        total: g._sum.amount ? g._sum.amount.toFixed(7) : "0.0000000",
+      }));
 
       res.json({
         totalTransactions,
-        uniqueSupporters: uniqueSupporters.length,
-        totalAmountXLM: xlmTotal,
-        assetTotals: formattedTotals,
+        uniqueSupporters: uniqueSupportersList.length,
+        totalByAsset,
+        firstSupportedAt: aggregates._min.createdAt ? aggregates._min.createdAt.toISOString() : null,
+        lastSupportedAt: aggregates._max.createdAt ? aggregates._max.createdAt.toISOString() : null,
       });
     } catch (e: unknown) {
       req.log.error({ err: e }, "database error fetching profile stats");
@@ -1688,49 +1696,6 @@ export function createApp(customLogger?: Logger) {
     },
   );
 
-  // ── Profile Stats ──────────────────────────────────────────────────────
-
-  app.get("/profiles/:username/stats", async (req, res) => {
-    try {
-      const profile = await prisma.profile.findUnique({
-        where: { username: req.params.username },
-      });
-
-      if (!profile) {
-        return sendError(res, 404, "Profile not found");
-      }
-
-      const [transactions, uniqueSupporters] = await Promise.all([
-        prisma.supportTransaction.findMany({
-          where: { recipientAddress: profile.walletAddress },
-        }),
-        prisma.supportTransaction.findMany({
-          where: { recipientAddress: profile.walletAddress },
-          distinct: ["supporterAddress"],
-          select: { supporterAddress: true },
-        }),
-      ]);
-
-      const assetBreakdown: Record<string, number> = {};
-      let totalEarned = 0;
-
-      transactions.forEach((tx) => {
-        const amount = parseFloat(tx.amount.toString());
-        totalEarned += amount;
-        const key = `${tx.assetCode}${tx.assetIssuer ? `:${tx.assetIssuer}` : ""}`;
-        assetBreakdown[key] = (assetBreakdown[key] || 0) + amount;
-      });
-
-      res.json({
-        totalEarned,
-        totalTransactions: transactions.length,
-        uniqueSupporters: uniqueSupporters.length,
-        assetBreakdown,
-      });
-    } catch {
-      return sendError(res, 500, "Internal server error");
-    }
-  });
 
   // ── Milestones ─────────────────────────────────────────────────────────
 
