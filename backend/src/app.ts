@@ -419,17 +419,17 @@ export function createApp(customLogger?: Logger) {
           });
         } else if (sort === "most_transactions") {
           sorted = profiles.sort(
-            (a, b) =>
+            (a: any, b: any) =>
               b.supportTransactions.length - a.supportTransactions.length,
           );
         }
 
         const filtered = asset
-          ? sorted.filter((p) => p.acceptedAssets.some((a) => a.code === asset))
+          ? sorted.filter((p: any) => p.acceptedAssets.some((a: any) => a.code === asset))
           : sorted;
 
         const paginated = filtered.slice(offset, offset + limit);
-        const result = paginated.map((p) => {
+        const result = paginated.map((p: any) => {
           const { supportTransactions: _supportTransactions, ...profile } = p;
           return profile;
         });
@@ -455,7 +455,7 @@ export function createApp(customLogger?: Logger) {
       ]);
 
       const filtered = asset
-        ? profiles.filter((p) => p.acceptedAssets.some((a) => a.code === asset))
+        ? profiles.filter((p: any) => p.acceptedAssets.some((a: any) => a.code === asset))
         : profiles;
 
       res.json({
@@ -1131,7 +1131,7 @@ export function createApp(customLogger?: Logger) {
       ? { acceptedAssets: { some: { code: asset } } }
       : {};
 
-    let orderBy: Prisma.ProfileOrderByWithRelationInput;
+    let orderBy: any;
     if (sort === "most_supported") {
       orderBy = { supportTransactions: { _count: "desc" } };
     } else if (sort === "most_transactions") {
@@ -1188,7 +1188,7 @@ export function createApp(customLogger?: Logger) {
     const parsed = webhookCreateSchema.safeParse(req.body);
     if (!parsed.success) return sendError(res, 400, "Invalid URL — must be a valid HTTPS URL");
 
-    const profile = await resolveProfileOwner(req.params.username, req.auth!.userId, res);
+    const profile = await resolveProfileOwner(req.params.username as string, (req.auth!.userId || req.auth!.walletAddress) as string, res);
     if (!profile) return;
 
     const secret = randomBytes(32).toString("hex");
@@ -1200,7 +1200,7 @@ export function createApp(customLogger?: Logger) {
   });
 
   app.get("/profiles/:username/webhooks", requireAuth, async (req, res) => {
-    const profile = await resolveProfileOwner(req.params.username, req.auth!.userId, res);
+    const profile = await resolveProfileOwner(req.params.username as string, (req.auth!.userId || req.auth!.walletAddress) as string, res);
     if (!profile) return;
 
     const webhooks = await prisma.webhook.findMany({
@@ -1212,7 +1212,7 @@ export function createApp(customLogger?: Logger) {
   });
 
   app.delete("/profiles/:username/webhooks/:id", requireAuth, async (req, res) => {
-    const profile = await resolveProfileOwner(req.params.username, req.auth!.userId, res);
+    const profile = await resolveProfileOwner(req.params.username as string, (req.auth!.userId || req.auth!.walletAddress) as string, res);
     if (!profile) return;
 
     const webhook = await prisma.webhook.findFirst({
@@ -1252,7 +1252,7 @@ export function createApp(customLogger?: Logger) {
       take: 10,
     });
 
-    const leaderboard = grouped.map((entry) => ({
+    const leaderboard = grouped.map((entry: any) => ({
       supporterAddress: entry.supporterAddress as string,
       assetCode: entry.assetCode,
       totalAmount: entry._sum.amount?.toString() ?? "0",
@@ -1379,11 +1379,8 @@ export function createApp(customLogger?: Logger) {
 
           return record;
         });
-      } catch (error: unknown) {
-        if (
-          error instanceof Prisma.PrismaClientKnownRequestError &&
-          error.code === "P2002"
-        ) {
+      } catch (error: any) {
+        if (error?.code === "P2002") {
           return sendError(res, 409, "Transaction already recorded", "DUPLICATE_TX");
         }
         throw error;
@@ -1846,10 +1843,10 @@ export function createApp(customLogger?: Logger) {
         });
       }
 
-      const profilesSupported = new Set(transactions.map((tx) => tx.profileId)).size;
+      const profilesSupported = new Set(transactions.map((tx: any) => tx.profileId)).size;
       const totalByAsset: Record<string, number> = {};
 
-      transactions.forEach((tx) => {
+      transactions.forEach((tx: any) => {
         const amount = parseFloat(tx.amount.toString());
         const key = `${tx.assetCode}${tx.assetIssuer ? `:${tx.assetIssuer}` : ""}`;
         totalByAsset[key] = (totalByAsset[key] || 0) + amount;
@@ -1860,7 +1857,7 @@ export function createApp(customLogger?: Logger) {
         totalTransactions: transactions.length,
         profilesSupported,
         totalByAsset,
-        transactions: transactions.map((tx) => ({
+        transactions: transactions.map((tx: any) => ({
           id: tx.id,
           amount: tx.amount.toString(),
           assetCode: tx.assetCode,
@@ -1914,7 +1911,7 @@ export function createApp(customLogger?: Logger) {
             AND "status" != 'failed'
             AND "createdAt" >= ${from}
             AND "createdAt" <= ${to}
-            ${assetCode ? Prisma.sql`AND "assetCode" = ${assetCode}` : Prisma.empty}
+            ${assetCode ? (Prisma as any).sql`AND "assetCode" = ${assetCode}` : (Prisma as any).empty}
           GROUP BY DATE_TRUNC('month', "createdAt")
           ORDER BY date ASC
         `;
@@ -1929,7 +1926,7 @@ export function createApp(customLogger?: Logger) {
             AND "status" != 'failed'
             AND "createdAt" >= ${from}
             AND "createdAt" <= ${to}
-            ${assetCode ? Prisma.sql`AND "assetCode" = ${assetCode}` : Prisma.empty}
+            ${assetCode ? (Prisma as any).sql`AND "assetCode" = ${assetCode}` : (Prisma as any).empty}
           GROUP BY DATE_TRUNC('week', "createdAt")
           ORDER BY date ASC
         `;
@@ -1944,7 +1941,7 @@ export function createApp(customLogger?: Logger) {
             AND "status" != 'failed'
             AND "createdAt" >= ${from}
             AND "createdAt" <= ${to}
-            ${assetCode ? Prisma.sql`AND "assetCode" = ${assetCode}` : Prisma.empty}
+            ${assetCode ? (Prisma as any).sql`AND "assetCode" = ${assetCode}` : (Prisma as any).empty}
           GROUP BY DATE_TRUNC('day', "createdAt")
           ORDER BY date ASC
         `;
