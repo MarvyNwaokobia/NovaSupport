@@ -1,5 +1,7 @@
 import cors from "cors";
 import express, { Response } from "express";
+import { randomBytes } from "node:crypto";
+import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "./db.js";
 
@@ -126,6 +128,7 @@ export function createApp() {
     res.json({ transactions, total, limit, offset });
   });
 
+  // Issue #229 — return 409 DUPLICATE_TX for duplicate txHash
   app.post("/support-transactions", async (req, res) => {
     const parsed = supportPayloadSchema.safeParse(req.body);
 
@@ -134,11 +137,133 @@ export function createApp() {
       return;
     }
 
-    const supportRecord = await prisma.supportTransaction.create({
-      data: parsed.data
+    try {
+      const supportRecord = await prisma.supportTransaction.create({
+        data: parsed.data
+      });
+      res.status(201).json(supportRecord);
+    } catch (error: unknown) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2002"
+      ) {
+        return sendError(res, 409, "Transaction already recorded", "DUPLICATE_TX");
+      }
+      return sendError(res, 500, "Internal server error");
+    }
+  });
+
+  // Issue #204 — GET /profiles (explore page, paginated + sortable + asset filter)
+  app.get("/profiles", async (req, res) => {
+    const limit = Math.min(parseInt(req.query.limit as string) || 20, 50);
+    const offset = parseInt(req.query.offset as string) || 0;
+    const sort = (req.query.sort as string) || "newest";
+    const asset = req.query.asset as string | undefined;
+
+    const assetFilter = asset
+      ? { acceptedAssets: { some: { code: asset } } }
+      : {};
+
+    let orderBy: Prisma.ProfileOrderByWithRelationInput;
+    if (sort === "most_supported") {
+      orderBy = { supportTransactions: { _count: "desc" } };
+    } else if (sort === "most_transactions") {
+      orderBy = { supportTransactions: { _count: "desc" } };
+    } else {
+      orderBy = { createdAt: "desc" };
+    }
+
+    const [profiles, total] = await Promise.all([
+      prisma.profile.findMany({
+        where: assetFilter,
+        take: limit,
+        skip: offset,
+        orderBy,
+        select: {
+          username: true,
+          displayName: true,
+          avatarUrl: true,
+          bio: true,
+          createdAt: true,
+          acceptedAssets: { select: { code: true, issuer: true } },
+        },
+      }),
+      prisma.profile.count({ where: assetFilter }),
+    ]);
+
+    res.json({ profiles, total, limit, offset });
+  });
+
+  // Issue #220 — Webhook CRUD endpoints
+  const webhookCreateSchema = z.object({
+    url: z.string().url().startsWith("https://"),
+  });
+
+  // Helper: resolve profile and verify owner
+  async function resolveProfileOwner(
+    username: string,
+    ownerId: string,
+    res: Response,
+  ) {
+    const profile = await prisma.profile.findUnique({ where: { username } });
+    if (!profile) {
+      sendError(res, 404, "Profile not found");
+      return null;
+    }
+    if (profile.ownerId !== ownerId) {
+      sendError(res, 403, "Forbidden");
+      return null;
+    }
+    return profile;
+  }
+
+  app.post("/profiles/:username/webhooks", async (req, res) => {
+    const ownerId = req.headers["x-owner-id"] as string;
+    if (!ownerId) return sendError(res, 401, "Unauthorized");
+
+    const parsed = webhookCreateSchema.safeParse(req.body);
+    if (!parsed.success) return sendError(res, 400, "Invalid URL — must be a valid HTTPS URL");
+
+    const profile = await resolveProfileOwner(req.params.username, ownerId, res);
+    if (!profile) return;
+
+    const secret = randomBytes(32).toString("hex");
+    const webhook = await prisma.webhook.create({
+      data: { url: parsed.data.url, secret, profileId: profile.id },
     });
 
-    res.status(201).json(supportRecord);
+    return res.status(201).json({ id: webhook.id, url: webhook.url, secret });
+  });
+
+  app.get("/profiles/:username/webhooks", async (req, res) => {
+    const ownerId = req.headers["x-owner-id"] as string;
+    if (!ownerId) return sendError(res, 401, "Unauthorized");
+
+    const profile = await resolveProfileOwner(req.params.username, ownerId, res);
+    if (!profile) return;
+
+    const webhooks = await prisma.webhook.findMany({
+      where: { profileId: profile.id },
+      select: { id: true, url: true, active: true, createdAt: true },
+    });
+
+    return res.json(webhooks);
+  });
+
+  app.delete("/profiles/:username/webhooks/:id", async (req, res) => {
+    const ownerId = req.headers["x-owner-id"] as string;
+    if (!ownerId) return sendError(res, 401, "Unauthorized");
+
+    const profile = await resolveProfileOwner(req.params.username, ownerId, res);
+    if (!profile) return;
+
+    const webhook = await prisma.webhook.findFirst({
+      where: { id: req.params.id, profileId: profile.id },
+    });
+    if (!webhook) return sendError(res, 404, "Webhook not found");
+
+    await prisma.webhook.delete({ where: { id: webhook.id } });
+    return res.status(204).send();
   });
 
   return app;
