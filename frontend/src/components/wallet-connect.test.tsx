@@ -55,7 +55,26 @@ describe('WalletConnect', () => {
     expect(screen.getByText(/GAAAAA/)).toBeInTheDocument();
   });
 
-  it('shows not installed message when Freighter is not available', async () => {
+  it('shows install prompt with link when Freighter is not available', async () => {
+    (window as any).stellarLumens = undefined;
+    
+    render(<WalletConnect />);
+    
+    const button = screen.queryByRole('button', { name: 'Connect Freighter' });
+    fireEvent.click(button!);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Freighter wallet required/)).toBeInTheDocument();
+    });
+    
+    const installLink = screen.getByRole('link', { name: /Install Freighter/i });
+    expect(installLink).toBeInTheDocument();
+    expect(installLink).toHaveAttribute('href', 'https://freighter.app');
+    expect(installLink).toHaveAttribute('target', '_blank');
+    expect(installLink).toHaveAttribute('rel', 'noopener noreferrer');
+  });
+
+  it('does not render connect button when Freighter is not installed', async () => {
     (window as any).stellarLumens = undefined;
     
     render(<WalletConnect />);
@@ -64,8 +83,10 @@ describe('WalletConnect', () => {
     fireEvent.click(button);
 
     await waitFor(() => {
-      expect(screen.getByText(/Freighter wallet is not installed/)).toBeInTheDocument();
+      expect(screen.getByText(/Freighter wallet required/)).toBeInTheDocument();
     });
-    expect(screen.getByText(/Install it here/)).toBeInTheDocument();
+    
+    // Button should not be visible after detecting Freighter is not installed
+    expect(screen.queryByRole('button', { name: 'Connect Freighter' })).not.toBeInTheDocument();
   });
 });
