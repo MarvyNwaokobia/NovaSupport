@@ -207,15 +207,17 @@ async function main() {
       assert.equal(response.status, 200);
 
       const body = await response.json();
-      assert.deepEqual(body, {
-        totalTransactions: 3,
-        uniqueSupporters: 2,
-        totalAmountXLM: "15.5000000",
-        assetTotals: [
-          { assetCode: "USDC", total: "2.2500000" },
-          { assetCode: "XLM", total: "15.5000000" },
-        ],
-      });
+      assert.equal(body.totalTransactions, 3);
+      assert.equal(body.uniqueSupporters, 2);
+      assert.ok(body.firstSupportedAt);
+      assert.ok(body.lastSupportedAt);
+
+      // Sort to ensure deterministic deepEqual
+      const sortedTotals = body.totalByAsset.sort((a: any, b: any) => a.assetCode.localeCompare(b.assetCode));
+      assert.deepEqual(sortedTotals, [
+        { assetCode: "USDC", assetIssuer: null, total: "2.2500000" },
+        { assetCode: "XLM", assetIssuer: null, total: "15.5000000" },
+      ]);
     });
 
     await runTest("returns 404 for stats of unknown profile", async () => {
