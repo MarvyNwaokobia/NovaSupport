@@ -44,6 +44,7 @@ export function SupportPanel({
   const [amount, setAmount] = useState("");
   const [isSigning, setIsSigning] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [signedXdr, setSignedXdr] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [submittedHash, setSubmittedHash] = useState<string | null>(null);
   const [showResultModal, setShowResultModal] = useState(false);
@@ -214,6 +215,40 @@ export function SupportPanel({
     return "Unable to submit transaction to Stellar. Please try again.";
   }
 
+  function mapFreighterError(error: unknown): string {
+    const msg =
+      error instanceof Error
+        ? error.message
+        : typeof error === "string"
+          ? error
+          : "";
+
+    const lower = msg.toLowerCase();
+
+    if (
+      lower.includes("user declined") ||
+      lower.includes("user rejected") ||
+      lower.includes("rejected") ||
+      lower.includes("declined")
+    ) {
+      return "You declined the transaction in Freighter.";
+    }
+
+    if (
+      lower.includes("not installed") ||
+      lower.includes("no freighter") ||
+      lower.includes("freighter is not")
+    ) {
+      return "Freighter is not installed. Please install the Freighter browser extension and try again.";
+    }
+
+    if (lower.includes("not allowed") || lower.includes("permission")) {
+      return "Freighter access was not granted. Please allow the site in Freighter and try again.";
+    }
+
+    return msg || "Freighter did not return a signed transaction.";
+  }
+
   async function handleSendSupport() {
     if (!visitorAddress || !isValidAmount || isProcessing || noPathFound) {
       return;
@@ -228,8 +263,11 @@ export function SupportPanel({
 
     setErrorMessage(null);
     setSubmittedHash(null);
+    setSignedXdr(null);
     setRecurringError(null);
     setIsSigning(true);
+
+    let resolvedSignedXdr: string;
 
     try {
       const isSameAsset =
@@ -268,6 +306,7 @@ export function SupportPanel({
         });
       }
 
+      // Open Freighter signing prompt — user sees "Waiting for Freighter signature…"
       const signedResult = await signTransaction(unsignedXdr, {
         address: visitorAddress,
         networkPassphrase: stellarConfig.networkPassphrase,
@@ -283,11 +322,21 @@ export function SupportPanel({
       // Transaction signed successfully
       console.log("Transaction signed by Freighter");
 
+      // Store the signed XDR in state for the broadcast step
+      resolvedSignedXdr = signedResult.signedTxXdr;
+      setSignedXdr(resolvedSignedXdr);
+    } catch (signingError) {
+      setErrorMessage(mapFreighterError(signingError));
       setIsSigning(false);
-      setIsSubmitting(true);
+      return;
+    }
 
+    setIsSigning(false);
+    setIsSubmitting(true);
+
+    try {
       const transactionToSubmit = TransactionBuilder.fromXDR(
-        signedResult.signedTxXdr,
+        resolvedSignedXdr,
         stellarConfig.networkPassphrase,
       );
 
