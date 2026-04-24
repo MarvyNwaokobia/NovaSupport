@@ -117,13 +117,14 @@ export function WalletConnect({ onConnect }: WalletConnectProps = {}) {
           <div className="mt-2 text-sm text-sky/80">
             {errorType === "not_installed" && (
               <p>
-                Freighter wallet is not installed.{" "}
+                Freighter wallet required.{" "}
                 <a
                   href="https://freighter.app"
                   target="_blank"
+                  rel="noopener noreferrer"
                   className="text-mint underline decoration-mint/30 underline-offset-4 hover:decoration-mint"
                 >
-                  Install it here →
+                  Install Freighter
                 </a>
               </p>
             )}
@@ -145,13 +146,15 @@ export function WalletConnect({ onConnect }: WalletConnectProps = {}) {
             {!errorType && <p>{status}</p>}
           </div>
         </div>
-        <button
-          type="button"
-          onClick={address ? disconnectWallet : connectWallet}
-          className="rounded-full bg-mint px-4 py-2 text-sm font-semibold text-ink transition hover:bg-white"
-        >
-          {address ? "Disconnect" : "Connect Freighter"}
-        </button>
+        {errorType !== "not_installed" && (
+          <button
+            type="button"
+            onClick={address ? disconnectWallet : connectWallet}
+            className="rounded-full bg-mint px-4 py-2 text-sm font-semibold text-ink transition hover:bg-white"
+          >
+            {address ? "Disconnect" : "Connect Freighter"}
+          </button>
+        )}
       </div>
       {address ? (
         <div className="mt-4 rounded-2xl border border-mint/30 bg-ink/50 p-3 text-sm text-white">
