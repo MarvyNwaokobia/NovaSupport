@@ -244,7 +244,7 @@ export default function CreatePage() {
                     </label>
                     <span
                       className={`text-[10px] tabular-nums ${
-                        form.bio.length >= 260 ? "text-gold" : "text-steel/50"
+                        form.bio.length >= 270 ? "text-red-400" : "text-steel/50"
                       }`}
                     >
                       {form.bio.length}&nbsp;/&nbsp;280
