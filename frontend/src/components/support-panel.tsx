@@ -284,10 +284,43 @@ export function SupportPanel({
       const response =
         await horizonServer.submitTransaction(transactionToSubmit);
 
+      // Record confirmed on-chain transaction in the backend
+      if (profileId) {
+        try {
+          const token = localStorage.getItem("authToken");
+          const backendRes = await fetch(`${API_BASE_URL}/support-transactions`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            body: JSON.stringify({
+              txHash: response.hash,
+              amount,
+              assetCode: paymentAsset?.code || "XLM",
+              recipientAddress: walletAddress,
+              profileId,
+              message: message || undefined,
+            }),
+          });
+
+          if (!backendRes.ok) {
+            const data = await backendRes.json().catch(() => ({}));
+            // 409 means tx already recorded — silently ignore
+            if (backendRes.status !== 409) {
+              console.error("Failed to record transaction in backend", data);
+            }
+          }
+        } catch (backendErr) {
+          // Never surface backend errors — the on-chain tx succeeded
+          console.error("Backend record error", backendErr);
+        }
+      }
+
       setSubmittedHash(response.hash);
-      setLastTxDetails({ 
-        amount: amount, 
-        assetCode: paymentAsset?.code || "XLM" 
+      setLastTxDetails({
+        amount: amount,
+        assetCode: paymentAsset?.code || "XLM",
       });
       setShowResultModal(true);
 

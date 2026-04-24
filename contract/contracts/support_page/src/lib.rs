@@ -7,6 +7,7 @@ use soroban_sdk::{contract, contracterror, contractimpl, contracttype, symbol_sh
 pub enum Error {
     InvalidAmount = 1,
     Unauthorized = 2,
+    ContractPaused = 3,
 }
 
 #[derive(Clone)]
@@ -16,6 +17,8 @@ pub enum DataKey {
     RecipientCount(Address),
     RecipientTotal(Address),
     TotalByAsset(Address, Address), // (Recipient, Asset)
+    Admin,
+    Paused,
 }
 
 #[derive(Clone)]
@@ -34,6 +37,39 @@ pub struct SupportPageContract;
 
 #[contractimpl]
 impl SupportPageContract {
+    pub fn initialize(e: Env, admin: Address) {
+        e.storage().persistent().set(&DataKey::Admin, &admin);
+        e.storage().persistent().set(&DataKey::Paused, &false);
+    }
+
+    pub fn pause(e: Env, caller: Address) -> Result<(), Error> {
+        caller.require_auth();
+        let admin: Address = e
+            .storage()
+            .persistent()
+            .get(&DataKey::Admin)
+            .ok_or(Error::Unauthorized)?;
+        if caller != admin {
+            return Err(Error::Unauthorized);
+        }
+        e.storage().persistent().set(&DataKey::Paused, &true);
+        Ok(())
+    }
+
+    pub fn unpause(e: Env, caller: Address) -> Result<(), Error> {
+        caller.require_auth();
+        let admin: Address = e
+            .storage()
+            .persistent()
+            .get(&DataKey::Admin)
+            .ok_or(Error::Unauthorized)?;
+        if caller != admin {
+            return Err(Error::Unauthorized);
+        }
+        e.storage().persistent().set(&DataKey::Paused, &false);
+        Ok(())
+    }
+
     pub fn support(
         e: Env,
         s: Address,
@@ -44,6 +80,16 @@ impl SupportPageContract {
         m: String,
     ) -> Result<u32, Error> {
         s.require_auth();
+
+        let paused: bool = e
+            .storage()
+            .persistent()
+            .get(&DataKey::Paused)
+            .unwrap_or(false);
+        if paused {
+            return Err(Error::ContractPaused);
+        }
+
         if o <= 0 {
             return Err(Error::InvalidAmount);
         }
@@ -278,6 +324,128 @@ mod test {
 
         // Attacker tries to withdraw recipient's funds
         client.withdraw(&attacker, &recipient, &asset, &5_000_i128);
+    }
+
+    #[test]
+    fn supporter_count_tracks_independently_per_recipient() {
+        let e = Env::default();
+        e.mock_all_auths();
+        let contract_id = e.register(SupportPageContract, ());
+        let client = SupportPageContractClient::new(&e, &contract_id);
+
+        let supporter_one = Address::generate(&e);
+        let supporter_two = Address::generate(&e);
+        let recipient_one = Address::generate(&e);
+        let recipient_two = Address::generate(&e);
+        let admin = Address::generate(&e);
+        let asset = e.register_stellar_asset_contract_v2(admin.clone()).address();
+        let token_admin = soroban_sdk::token::StellarAssetClient::new(&e, &asset);
+        token_admin.mint(&supporter_one, &10_000_i128);
+        token_admin.mint(&supporter_two, &10_000_i128);
+
+        client.support(
+            &supporter_one,
+            &recipient_one,
+            &asset,
+            &1_000_i128,
+            &String::from_str(&e, "XLM"),
+            &String::from_str(&e, "For recipient one"),
+        );
+        client.support(
+            &supporter_two,
+            &recipient_two,
+            &asset,
+            &2_000_i128,
+            &String::from_str(&e, "XLM"),
+            &String::from_str(&e, "For recipient two"),
+        );
+
+        assert_eq!(client.recipient_count(&recipient_one), 1);
+        assert_eq!(client.recipient_count(&recipient_two), 1);
+    }
+
+    #[test]
+    fn supporter_count_returns_zero_for_unknown_recipient() {
+        let e = Env::default();
+        e.mock_all_auths();
+        let contract_id = e.register(SupportPageContract, ());
+        let client = SupportPageContractClient::new(&e, &contract_id);
+
+        let never_supported = Address::generate(&e);
+
+        assert_eq!(client.recipient_count(&never_supported), 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #3)")] // Error::ContractPaused
+    fn support_fails_when_contract_is_paused() {
+        let e = Env::default();
+        e.mock_all_auths();
+        let contract_id = e.register(SupportPageContract, ());
+        let client = SupportPageContractClient::new(&e, &contract_id);
+
+        let admin = Address::generate(&e);
+        let supporter = Address::generate(&e);
+        let recipient = Address::generate(&e);
+        let asset = e.register_stellar_asset_contract_v2(admin.clone()).address();
+        let token_admin = soroban_sdk::token::StellarAssetClient::new(&e, &asset);
+        token_admin.mint(&supporter, &10_000_i128);
+
+        client.initialize(&admin);
+        client.pause(&admin);
+
+        client.support(
+            &supporter,
+            &recipient,
+            &asset,
+            &1_000_i128,
+            &String::from_str(&e, "XLM"),
+            &String::from_str(&e, "Should be blocked"),
+        );
+    }
+
+    #[test]
+    fn support_succeeds_after_unpause() {
+        let e = Env::default();
+        e.mock_all_auths();
+        let contract_id = e.register(SupportPageContract, ());
+        let client = SupportPageContractClient::new(&e, &contract_id);
+
+        let admin = Address::generate(&e);
+        let supporter = Address::generate(&e);
+        let recipient = Address::generate(&e);
+        let asset = e.register_stellar_asset_contract_v2(admin.clone()).address();
+        let token_admin = soroban_sdk::token::StellarAssetClient::new(&e, &asset);
+        token_admin.mint(&supporter, &10_000_i128);
+
+        client.initialize(&admin);
+        client.pause(&admin);
+        client.unpause(&admin);
+
+        let count = client.support(
+            &supporter,
+            &recipient,
+            &asset,
+            &1_000_i128,
+            &String::from_str(&e, "XLM"),
+            &String::from_str(&e, "After unpause"),
+        );
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #2)")] // Error::Unauthorized
+    fn non_admin_cannot_pause() {
+        let e = Env::default();
+        e.mock_all_auths();
+        let contract_id = e.register(SupportPageContract, ());
+        let client = SupportPageContractClient::new(&e, &contract_id);
+
+        let admin = Address::generate(&e);
+        let intruder = Address::generate(&e);
+
+        client.initialize(&admin);
+        client.pause(&intruder);
     }
 
     #[test]

@@ -100,7 +100,15 @@ export function ProfileCard({
                 </div>
                 <div>
                   <p className="text-xs uppercase tracking-wider text-sky/60">Supporters</p>
-                  <p className="mt-1 text-sm font-semibold text-white">{stats.uniqueSupporters}</p>
+                  {stats.uniqueSupporters === 0 ? (
+                    <p className="mt-1 text-sm font-semibold text-gold">Be the first to support!</p>
+                  ) : (
+                    <p className="mt-1 text-sm font-semibold text-white">
+                      {stats.uniqueSupporters === 1
+                        ? "1 supporter"
+                        : `${stats.uniqueSupporters} supporters`}
+                    </p>
+                  )}
                 </div>
                 <div>
                   <p className="text-xs uppercase tracking-wider text-sky/60">Transactions</p>
