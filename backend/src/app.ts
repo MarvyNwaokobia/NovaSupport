@@ -406,30 +406,30 @@ export function createApp(customLogger?: Logger) {
 
         let sorted = profiles;
         if (sort === "most_supported") {
-          sorted = profiles.sort((a, b) => {
+          sorted = profiles.sort((a: any, b: any) => {
             const aTotal = a.supportTransactions.reduce(
-              (sum, tx) => sum + Number(tx.amount),
+              (sum: number, tx: any) => sum + Number(tx.amount),
               0,
             );
             const bTotal = b.supportTransactions.reduce(
-              (sum, tx) => sum + Number(tx.amount),
+              (sum: number, tx: any) => sum + Number(tx.amount),
               0,
             );
             return bTotal - aTotal;
           });
         } else if (sort === "most_transactions") {
           sorted = profiles.sort(
-            (a, b) =>
+            (a: any, b: any) =>
               b.supportTransactions.length - a.supportTransactions.length,
           );
         }
 
         const filtered = asset
-          ? sorted.filter((p) => p.acceptedAssets.some((a) => a.code === asset))
+          ? sorted.filter((p: any) => p.acceptedAssets.some((a: any) => a.code === asset))
           : sorted;
 
         const paginated = filtered.slice(offset, offset + limit);
-        const result = paginated.map((p) => {
+        const result = paginated.map((p: any) => {
           const { supportTransactions: _supportTransactions, ...profile } = p;
           return profile;
         });
@@ -455,7 +455,7 @@ export function createApp(customLogger?: Logger) {
       ]);
 
       const filtered = asset
-        ? profiles.filter((p) => p.acceptedAssets.some((a) => a.code === asset))
+        ? profiles.filter((p: any) => p.acceptedAssets.some((a: any) => a.code === asset))
         : profiles;
 
       res.json({
@@ -579,34 +579,42 @@ export function createApp(customLogger?: Logger) {
         return sendError(res, 404, "Profile not found");
       }
 
-      const where = { profileId: profile.id, status: "SUCCESS" };
+      const profileId = profile.id;
+      const where = { profileId, status: { not: "failed" } };
 
-      const [totalTransactions, uniqueSupporters, assetTotals] = await Promise.all([
-        prisma.supportTransaction.count({ where }),
+      const [uniqueSupportersList, assetGroups, aggregates] = await Promise.all([
         prisma.supportTransaction.findMany({
-          where,
-          select: { supporterAddress: true },
+          where: { ...where, supporterAddress: { not: null } },
           distinct: ["supporterAddress"],
+          select: { supporterAddress: true },
         }),
         prisma.supportTransaction.groupBy({
-          by: ["assetCode"],
+          by: ["assetCode", "assetIssuer"],
           where,
           _sum: { amount: true },
+          _count: true,
+        }),
+        prisma.supportTransaction.aggregate({
+          where,
+          _min: { createdAt: true },
+          _max: { createdAt: true },
         }),
       ]);
 
-      const formattedTotals = assetTotals.map((t) => ({
-        assetCode: t.assetCode,
-        total: t._sum.amount ? t._sum.amount.toFixed(7) : "0.0000000",
-      }));
+      const totalTransactions = assetGroups.reduce((acc: number, g: any) => acc + g._count, 0);
 
-      const xlmTotal = formattedTotals.find((a) => a.assetCode === "XLM")?.total ?? "0.0000000";
+      const totalByAsset = assetGroups.map((g: any) => ({
+        assetCode: g.assetCode,
+        assetIssuer: g.assetIssuer,
+        total: g._sum.amount ? g._sum.amount.toFixed(7) : "0.0000000",
+      }));
 
       res.json({
         totalTransactions,
-        uniqueSupporters: uniqueSupporters.length,
-        totalAmountXLM: xlmTotal,
-        assetTotals: formattedTotals,
+        uniqueSupporters: uniqueSupportersList.length,
+        totalByAsset,
+        firstSupportedAt: aggregates._min.createdAt ? aggregates._min.createdAt.toISOString() : null,
+        lastSupportedAt: aggregates._max.createdAt ? aggregates._max.createdAt.toISOString() : null,
       });
     } catch (e: unknown) {
       req.log.error({ err: e }, "database error fetching profile stats");
@@ -1123,7 +1131,7 @@ export function createApp(customLogger?: Logger) {
       ? { acceptedAssets: { some: { code: asset } } }
       : {};
 
-    let orderBy: Prisma.ProfileOrderByWithRelationInput;
+    let orderBy: any;
     if (sort === "most_supported") {
       orderBy = { supportTransactions: { _count: "desc" } };
     } else if (sort === "most_transactions") {
@@ -1180,7 +1188,7 @@ export function createApp(customLogger?: Logger) {
     const parsed = webhookCreateSchema.safeParse(req.body);
     if (!parsed.success) return sendError(res, 400, "Invalid URL — must be a valid HTTPS URL");
 
-    const profile = await resolveProfileOwner(req.params.username, req.auth!.userId, res);
+    const profile = await resolveProfileOwner(req.params.username as string, (req.auth!.userId || req.auth!.walletAddress) as string, res);
     if (!profile) return;
 
     const secret = randomBytes(32).toString("hex");
@@ -1192,7 +1200,7 @@ export function createApp(customLogger?: Logger) {
   });
 
   app.get("/profiles/:username/webhooks", requireAuth, async (req, res) => {
-    const profile = await resolveProfileOwner(req.params.username, req.auth!.userId, res);
+    const profile = await resolveProfileOwner(req.params.username as string, (req.auth!.userId || req.auth!.walletAddress) as string, res);
     if (!profile) return;
 
     const webhooks = await prisma.webhook.findMany({
@@ -1204,7 +1212,7 @@ export function createApp(customLogger?: Logger) {
   });
 
   app.delete("/profiles/:username/webhooks/:id", requireAuth, async (req, res) => {
-    const profile = await resolveProfileOwner(req.params.username, req.auth!.userId, res);
+    const profile = await resolveProfileOwner(req.params.username as string, (req.auth!.userId || req.auth!.walletAddress) as string, res);
     if (!profile) return;
 
     const webhook = await prisma.webhook.findFirst({
@@ -1244,7 +1252,7 @@ export function createApp(customLogger?: Logger) {
       take: 10,
     });
 
-    const leaderboard = grouped.map((entry) => ({
+    const leaderboard = grouped.map((entry: any) => ({
       supporterAddress: entry.supporterAddress as string,
       assetCode: entry.assetCode,
       totalAmount: entry._sum.amount?.toString() ?? "0",
@@ -1340,14 +1348,39 @@ export function createApp(customLogger?: Logger) {
 
       let supportRecord;
       try {
-        supportRecord = await prisma.supportTransaction.create({
-          data: parsed.data,
+        supportRecord = await prisma.$transaction(async (tx: any) => {
+          const record = await tx.supportTransaction.create({
+            data: parsed.data,
+          });
+
+          const milestones = await tx.milestone.findMany({
+            where: {
+              profileId: parsed.data.profileId,
+              assetCode: parsed.data.assetCode,
+              status: "active",
+            },
+          });
+
+          for (const milestone of milestones) {
+            const updated = await tx.milestone.update({
+              where: { id: milestone.id },
+              data: {
+                currentAmount: { increment: parsed.data.amount },
+              },
+            });
+
+            if (Number(updated.currentAmount) >= Number(updated.targetAmount)) {
+              await tx.milestone.update({
+                where: { id: milestone.id },
+                data: { status: "reached" },
+              });
+            }
+          }
+
+          return record;
         });
-      } catch (error: unknown) {
-        if (
-          error instanceof Prisma.PrismaClientKnownRequestError &&
-          error.code === "P2002"
-        ) {
+      } catch (error: any) {
+        if (error?.code === "P2002") {
           return sendError(res, 409, "Transaction already recorded", "DUPLICATE_TX");
         }
         throw error;
@@ -1660,49 +1693,6 @@ export function createApp(customLogger?: Logger) {
     },
   );
 
-  // ── Profile Stats ──────────────────────────────────────────────────────
-
-  app.get("/profiles/:username/stats", async (req, res) => {
-    try {
-      const profile = await prisma.profile.findUnique({
-        where: { username: req.params.username },
-      });
-
-      if (!profile) {
-        return sendError(res, 404, "Profile not found");
-      }
-
-      const [transactions, uniqueSupporters] = await Promise.all([
-        prisma.supportTransaction.findMany({
-          where: { recipientAddress: profile.walletAddress },
-        }),
-        prisma.supportTransaction.findMany({
-          where: { recipientAddress: profile.walletAddress },
-          distinct: ["supporterAddress"],
-          select: { supporterAddress: true },
-        }),
-      ]);
-
-      const assetBreakdown: Record<string, number> = {};
-      let totalEarned = 0;
-
-      transactions.forEach((tx) => {
-        const amount = parseFloat(tx.amount.toString());
-        totalEarned += amount;
-        const key = `${tx.assetCode}${tx.assetIssuer ? `:${tx.assetIssuer}` : ""}`;
-        assetBreakdown[key] = (assetBreakdown[key] || 0) + amount;
-      });
-
-      res.json({
-        totalEarned,
-        totalTransactions: transactions.length,
-        uniqueSupporters: uniqueSupporters.length,
-        assetBreakdown,
-      });
-    } catch {
-      return sendError(res, 500, "Internal server error");
-    }
-  });
 
   // ── Milestones ─────────────────────────────────────────────────────────
 
@@ -1853,10 +1843,10 @@ export function createApp(customLogger?: Logger) {
         });
       }
 
-      const profilesSupported = new Set(transactions.map((tx) => tx.profileId)).size;
+      const profilesSupported = new Set(transactions.map((tx: any) => tx.profileId)).size;
       const totalByAsset: Record<string, number> = {};
 
-      transactions.forEach((tx) => {
+      transactions.forEach((tx: any) => {
         const amount = parseFloat(tx.amount.toString());
         const key = `${tx.assetCode}${tx.assetIssuer ? `:${tx.assetIssuer}` : ""}`;
         totalByAsset[key] = (totalByAsset[key] || 0) + amount;
@@ -1867,7 +1857,7 @@ export function createApp(customLogger?: Logger) {
         totalTransactions: transactions.length,
         profilesSupported,
         totalByAsset,
-        transactions: transactions.map((tx) => ({
+        transactions: transactions.map((tx: any) => ({
           id: tx.id,
           amount: tx.amount.toString(),
           assetCode: tx.assetCode,
@@ -1921,7 +1911,7 @@ export function createApp(customLogger?: Logger) {
             AND "status" != 'failed'
             AND "createdAt" >= ${from}
             AND "createdAt" <= ${to}
-            ${assetCode ? Prisma.sql`AND "assetCode" = ${assetCode}` : Prisma.empty}
+            ${assetCode ? (Prisma as any).sql`AND "assetCode" = ${assetCode}` : (Prisma as any).empty}
           GROUP BY DATE_TRUNC('month', "createdAt")
           ORDER BY date ASC
         `;
@@ -1936,7 +1926,7 @@ export function createApp(customLogger?: Logger) {
             AND "status" != 'failed'
             AND "createdAt" >= ${from}
             AND "createdAt" <= ${to}
-            ${assetCode ? Prisma.sql`AND "assetCode" = ${assetCode}` : Prisma.empty}
+            ${assetCode ? (Prisma as any).sql`AND "assetCode" = ${assetCode}` : (Prisma as any).empty}
           GROUP BY DATE_TRUNC('week', "createdAt")
           ORDER BY date ASC
         `;
@@ -1951,7 +1941,7 @@ export function createApp(customLogger?: Logger) {
             AND "status" != 'failed'
             AND "createdAt" >= ${from}
             AND "createdAt" <= ${to}
-            ${assetCode ? Prisma.sql`AND "assetCode" = ${assetCode}` : Prisma.empty}
+            ${assetCode ? (Prisma as any).sql`AND "assetCode" = ${assetCode}` : (Prisma as any).empty}
           GROUP BY DATE_TRUNC('day', "createdAt")
           ORDER BY date ASC
         `;
