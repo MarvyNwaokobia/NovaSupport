@@ -239,11 +239,19 @@ function downloadCsv(rows: TransactionCsvRow[]): void {
   URL.revokeObjectURL(url);
 }
 
+type AssetBreakdownEntry = {
+  assetCode: string;
+  amount: number;
+  percentage: number;
+};
+
 export default function DashboardPage() {
   const { campaignId } = useParams<{ campaignId: string }>();
   const [data, setData] = useState<AnalyticsData | null>(null);
   const [settings, setSettings] = useState<ProfileSettings | null>(null);
   const [chartData, setChartData] = useState<ChartPoint[]>([]);
+  const [assetBreakdown, setAssetBreakdown] = useState<AssetBreakdownEntry[]>([]);
+  const [assetTotal, setAssetTotal] = useState(0);
   const [selectedPeriod, setSelectedPeriod] = useState<ChartRange>("30D");
   const [chartLoading, setChartLoading] = useState(true);
   const [connectedWallet, setConnectedWallet] = useState("");
@@ -255,9 +263,10 @@ export default function DashboardPage() {
   useEffect(() => {
     async function fetchData() {
       try {
-        const [analyticsRes, profileRes] = await Promise.all([
+        const [analyticsRes, profileRes, assetsRes] = await Promise.all([
           fetch(`${API_BASE_URL}/analytics/${campaignId}`),
           fetch(`${API_BASE_URL}/profiles/${campaignId}`),
+          fetch(`${API_BASE_URL}/profiles/${campaignId}/analytics/assets`),
         ]);
         if (!analyticsRes.ok) throw new Error("Failed to fetch analytics");
         if (!profileRes.ok) throw new Error("Failed to fetch profile settings");
@@ -270,6 +279,12 @@ export default function DashboardPage() {
           email: toString(profileJson.email, "") || null,
           notifyOnSupport: toBool(profileJson.notifyOnSupport, true),
         });
+
+        if (assetsRes.ok) {
+          const assetsJson = (await assetsRes.json()) as { breakdown: AssetBreakdownEntry[]; total: number };
+          setAssetBreakdown(assetsJson.breakdown ?? []);
+          setAssetTotal(assetsJson.total ?? 0);
+        }
       } catch (err: any) {
         setError(err.message);
       } finally {
@@ -536,8 +551,8 @@ export default function DashboardPage() {
             </div>
           </motion.div>
 
-          {/* Pie Chart */}
-          <motion.div 
+          {/* Asset Breakdown Chart */}
+          <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
             className="rounded-3xl border border-white/10 bg-white/5 p-6 shadow-sm shadow-black/40"
@@ -545,33 +560,56 @@ export default function DashboardPage() {
             <h3 className="mb-6 text-sm font-semibold uppercase tracking-widest text-steel">
               Asset Distribution
             </h3>
-            <div className="h-[350px] w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={data.assetBreakdown}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={60}
-                    outerRadius={100}
-                    paddingAngle={5}
-                    dataKey="value"
-                  >
-                    {data.assetBreakdown.map((_entry, index) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip 
-                    contentStyle={{ 
-                      backgroundColor: "#0A0A0B", 
-                      border: "1px solid rgba(255,255,255,0.1)",
-                      borderRadius: "12px"
-                    }}
-                  />
-                  <Legend verticalAlign="bottom" height={36}/>
-                </PieChart>
-              </ResponsiveContainer>
+            <div className="h-[280px] w-full">
+              {assetBreakdown.length === 0 ? (
+                <div className="flex h-full flex-col items-center justify-center rounded-3xl border border-dashed border-white/10 bg-white/[0.02] text-center">
+                  <p className="text-lg font-semibold text-white">No earnings data yet</p>
+                  <p className="mt-2 max-w-sm text-sm text-steel">
+                    Asset breakdown will appear once you receive support.
+                  </p>
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={assetBreakdown}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={60}
+                      outerRadius={100}
+                      paddingAngle={5}
+                      dataKey="amount"
+                      nameKey="assetCode"
+                      label={(props) => {
+                        const entry = props as unknown as AssetBreakdownEntry;
+                        return `${entry.assetCode} ${entry.percentage}%`;
+                      }}
+                      labelLine={false}
+                    >
+                      {assetBreakdown.map((_entry, index) => (
+                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: "#0A0A0B",
+                        border: "1px solid rgba(255,255,255,0.1)",
+                        borderRadius: "12px",
+                      }}
+                      formatter={(value, name) => [`${value} ${name}`, "Amount"]}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              )}
             </div>
+            {assetBreakdown.length > 0 && (
+              <div className="mt-4 border-t border-white/10 pt-4 text-center">
+                <p className="text-[10px] uppercase tracking-widest text-steel">Total Earned</p>
+                <p className="mt-1 text-xl font-bold text-white tabular-nums">
+                  {assetTotal.toLocaleString(undefined, { maximumFractionDigits: 7 })}
+                </p>
+              </div>
+            )}
           </motion.div>
         </div>
 
