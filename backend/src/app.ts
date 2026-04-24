@@ -21,6 +21,7 @@ import {
 import multer from "multer";
 import { createClient } from "@supabase/supabase-js";
 import { sendSupportReceivedEmail } from "./services/email.js";
+import { createHmac } from "crypto";
 
 // Extend Express Request to include auth context
 declare global {
@@ -1265,6 +1266,58 @@ export function createApp(customLogger?: Logger) {
         }
       })();
 
+      // Deliver webhooks (async, fire-and-forget)
+      (async () => {
+        try {
+          const webhooks = await prisma.webhook.findMany({
+            where: { profileId: supportRecord.profileId, active: true },
+            include: { profile: { select: { username: true } } },
+          });
+
+          for (const webhook of webhooks) {
+            const payload = JSON.stringify({
+              event: "support.received",
+              txHash: supportRecord.txHash,
+              amount: supportRecord.amount.toString(),
+              assetCode: supportRecord.assetCode,
+              message: supportRecord.message ?? null,
+              profileUsername: webhook.profile.username,
+              createdAt: supportRecord.createdAt.toISOString(),
+            });
+
+            const signature = createHmac("sha256", webhook.secret)
+              .update(payload)
+              .digest("hex");
+
+            fetch(webhook.url, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "X-NovaSupport-Signature": signature,
+              },
+              body: payload,
+            })
+              .then((res) => {
+                logger.info(
+                  { webhookId: webhook.id, profileId: supportRecord.profileId, status: res.status },
+                  "webhook delivered",
+                );
+              })
+              .catch((err) => {
+                logger.error(
+                  { webhookId: webhook.id, profileId: supportRecord.profileId, err },
+                  "webhook delivery failed",
+                );
+              });
+          }
+        } catch (err) {
+          logger.error(
+            { err, txHash: supportRecord.txHash },
+            "Error fetching webhooks for delivery",
+          );
+        }
+      })();
+
       req.log.info(
         { txHash: supportRecord.txHash },
         "support transaction recorded",
@@ -1794,6 +1847,33 @@ export function createApp(customLogger?: Logger) {
     const formatted = fillGaps(results as any[], period, from, to);
 
     return res.json(formatted);
+  });
+
+  app.get("/profiles/:username/analytics/assets", async (req, res) => {
+    const { username } = req.params;
+
+    const profile = await prisma.profile.findUnique({ where: { username } });
+    if (!profile) return sendError(res, 404, "Profile not found");
+
+    const transactions = await prisma.supportTransaction.findMany({
+      where: { profileId: profile.id, status: "SUCCESS" },
+      select: { assetCode: true, amount: true },
+    });
+
+    const assetMap = new Map<string, number>();
+    for (const tx of transactions) {
+      assetMap.set(tx.assetCode, (assetMap.get(tx.assetCode) ?? 0) + Number(tx.amount));
+    }
+
+    const total = Array.from(assetMap.values()).reduce((sum, v) => sum + v, 0);
+
+    const breakdown = Array.from(assetMap.entries()).map(([assetCode, amount]) => ({
+      assetCode,
+      amount: Number(amount.toFixed(7)),
+      percentage: total > 0 ? Number(((amount / total) * 100).toFixed(2)) : 0,
+    }));
+
+    return res.json({ breakdown, total: Number(total.toFixed(7)) });
   });
 
   return app;

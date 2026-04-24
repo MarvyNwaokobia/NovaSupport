@@ -4,6 +4,7 @@ import { AppShell } from "@/components/app-shell";
 import { ProfileCard } from "@/components/profile-card";
 import { SupportPanel } from "@/components/support-panel";
 import { ProfileTabs } from "@/components/profile-tabs";
+import { QRCodeButton } from "@/components/qr-code-button";
 import { API_BASE_URL } from "@/lib/config";
 
 type PageProps = {
@@ -179,12 +180,22 @@ async function getStats(username: string): Promise<ProfileStats | null> {
   return res.json();
 }
 
+async function getMilestones(username: string): Promise<Milestone[]> {
+  const res = await fetch(`${API_BASE_URL}/profiles/${username}/milestones`, {
+    next: { revalidate: 60 },
+  });
+  if (!res.ok) return [];
+  const body = await res.json();
+  return body.milestones ?? body ?? [];
+}
+
 export default async function ProfilePage({ params }: PageProps) {
-  const [profile, transactions, leaderboard, stats] = await Promise.all([
+  const [profile, transactions, leaderboard, stats, milestones] = await Promise.all([
     getProfile(params.username),
     getTransactions(params.username, 10),
     getLeaderboard(params.username),
     getStats(params.username),
+    getMilestones(params.username),
   ]);
 
   const activeMilestones = milestones.filter((m) => m.status === "active");
@@ -193,15 +204,20 @@ export default async function ProfilePage({ params }: PageProps) {
     <AppShell>
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_380px] gap-8 items-start">
         <div className="space-y-12">
-          <ProfileCard
-            username={profile.username}
-            displayName={profile.displayName}
-            bio={profile.bio}
-            walletAddress={profile.walletAddress}
-            acceptedAssets={profile.acceptedAssets}
-            avatarUrl={profile.avatarUrl || undefined}
-            stats={stats || undefined}
-          />
+          <div className="space-y-3">
+            <ProfileCard
+              username={profile.username}
+              displayName={profile.displayName}
+              bio={profile.bio}
+              walletAddress={profile.walletAddress}
+              acceptedAssets={profile.acceptedAssets}
+              avatarUrl={profile.avatarUrl || undefined}
+              stats={stats || undefined}
+            />
+            <div className="px-2">
+              <QRCodeButton username={profile.username} />
+            </div>
+          </div>
 
           {activeMilestones.length > 0 && (
             <div className="px-2 space-y-4">

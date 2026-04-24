@@ -36,6 +36,7 @@ model Profile {
   acceptedAssets      AcceptedAsset[]
   supportTransactions SupportTransaction[]
   milestones          Milestone[]
+  webhooks            Webhook[]
 }
 
 model AcceptedAsset {
@@ -83,6 +84,19 @@ model Milestone {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   profile       Profile   @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId])
+}
+
+model Webhook {
+  id        String   @id @default(cuid())
+  url       String
+  secret    String
+  active    Boolean  @default(true)
+  profileId String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  profile   Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
 
   @@index([profileId])
 }
