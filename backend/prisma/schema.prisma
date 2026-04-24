@@ -15,6 +15,7 @@ model User {
   updatedAt           DateTime             @updatedAt
   profiles            Profile[]
   supportTransactions SupportTransaction[] @relation("SupporterTransactions")
+  recurringSupports   RecurringSupport[]   @relation("RecurringSupporters")
 }
 
 model Profile {
@@ -35,6 +36,7 @@ model Profile {
   owner               User                 @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   acceptedAssets      AcceptedAsset[]
   supportTransactions SupportTransaction[]
+  recurringSupports   RecurringSupport[]
   milestones          Milestone[]
   webhooks            Webhook[]
 }
@@ -101,3 +103,21 @@ model Webhook {
   @@index([profileId])
 }
 
+model RecurringSupport {
+  id          String   @id @default(cuid())
+  supporterId String
+  profileId   String
+  amount      Decimal  @db.Decimal(18, 7)
+  assetCode   String   @default("XLM")
+  frequency   String
+  nextRunAt   DateTime
+  status      String   @default("active")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  supporter   User     @relation("RecurringSupporters", fields: [supporterId], references: [id], onDelete: Cascade)
+  profile     Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([supporterId])
+  @@index([profileId])
+  @@index([nextRunAt])
+}
