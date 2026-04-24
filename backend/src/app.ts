@@ -23,6 +23,7 @@ import multer from "multer";
 import { createClient } from "@supabase/supabase-js";
 import { sendSupportReceivedEmail } from "./services/email.js";
 import { createHmac } from "crypto";
+import { sanitizeBody, sanitizeQuery } from "./middleware/sanitize.js";
 
 // Extend Express Request to include auth context
 declare global {
@@ -161,6 +162,8 @@ export function createApp(customLogger?: Logger) {
     }),
   );
   app.use(express.json());
+  app.use(sanitizeBody);
+  app.use(sanitizeQuery);
   app.use(pinoHttp({ logger: customLogger ?? logger }));
   app.use(globalLimiter);
 
