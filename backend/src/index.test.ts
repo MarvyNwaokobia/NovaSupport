@@ -152,7 +152,7 @@ async function main() {
       assert.equal(profile.acceptedAssets.length, 2);
     });
 
-    await runTest("returns profile stats summary using only SUCCESS transactions", async () => {
+    await runTest("returns profile stats summary using all non-failed transactions", async () => {
       const supporterOne = `G${"B".repeat(55)}`;
       const supporterTwo = `G${"C".repeat(55)}`;
       const ignoredSupporter = `G${"D".repeat(55)}`;
@@ -207,8 +207,8 @@ async function main() {
       assert.equal(response.status, 200);
 
       const body = await response.json();
-      assert.equal(body.totalTransactions, 3);
-      assert.equal(body.uniqueSupporters, 2);
+      assert.equal(body.totalTransactions, 4);
+      assert.equal(body.uniqueSupporters, 3);
       assert.ok(body.firstSupportedAt);
       assert.ok(body.lastSupportedAt);
 
@@ -216,7 +216,7 @@ async function main() {
       const sortedTotals = body.totalByAsset.sort((a: any, b: any) => a.assetCode.localeCompare(b.assetCode));
       assert.deepEqual(sortedTotals, [
         { assetCode: "USDC", assetIssuer: null, total: "2.2500000" },
-        { assetCode: "XLM", assetIssuer: null, total: "15.5000000" },
+        { assetCode: "XLM", assetIssuer: null, total: "114.5000000" },
       ]);
     });
 
