@@ -30,12 +30,16 @@ The MVP only needs to show clear Soroban intent for the Stellar Wave submission.
 
 The contract ID is recorded in `frontend/.env.example` as `NEXT_PUBLIC_CONTRACT_ID`. After deploying, set the actual ID in `frontend/.env.local` (not committed) and update this table with the deployed contract ID and deployer address.
 
-## Local Use
+## Testing & Verification
+
+Before deploying, always run the local test suite to ensure contract logic is correct.
 
 ```bash
 cd contract
 cargo test
 ```
+
+For more comprehensive verification, you can use the Stellar CLI to simulate invocations on a local or testnet network.
 
 ## Contract Invocation
 
@@ -115,44 +119,44 @@ const preparedTx = await server.prepareTransaction(tx);
 
 **Note:** Remember to sign the transaction with the supporter's keypair or using a wallet like Freighter before submitting.
 
-### Build & Deploy to Testnet
+### Deployment & Upgrades
+
+#### Initial Deployment
 
 Follow these steps to build the WASM and deploy the contract to Stellar Testnet.
 
-Prerequisites
-
-- Rust stable toolchain installed
-- Add the wasm32 target: `rustup target add wasm32-unknown-unknown`
-- Install the Stellar CLI: `cargo install --locked stellar-cli`
-
-Generate and fund a Testnet key (alternative: use the Stellar Laboratory):
+**Prerequisites:**
+- Rust stable toolchain with `wasm32-unknown-unknown` target.
+- Stellar CLI installed (`cargo install --locked stellar-cli`).
+- A funded Testnet account (e.g., `mykey`).
 
 ```bash
-# generate a named keypair for deployment
-stellar keys generate --global mykey --network testnet
-
-# fund the account (Testnet)
-stellar keys fund mykey --network testnet
-```
-
-Build
-
-```bash
-cd contract
+# Build the contract
 stellar contract build
-# Output: target/wasm32-unknown-unknown/release/support_page.wasm
-```
 
-Deploy
-
-```bash
+# Deploy
 stellar contract deploy \
   --wasm target/wasm32-unknown-unknown/release/support_page.wasm \
   --network testnet \
   --source mykey
 ```
 
-After a successful deploy the CLI will print the contract ID. Add that value to your frontend environment as `NEXT_PUBLIC_CONTRACT_ID` (for example, in `frontend/.env.local`).
+After a successful deploy, the CLI will print the **Contract ID**. Update your frontend `.env.local` with:
+`NEXT_PUBLIC_CONTRACT_ID=<YOUR_CONTRACT_ID>`
+
+#### Upgrade Strategy
+
+**The NovaSupport contract is immutable once deployed.** There is no built-in "upgrade" function or admin key that can swap the WASM code for an existing Contract ID.
+
+To "upgrade" the contract:
+1. **Deploy a new instance:** Re-run the deployment steps with your updated WASM. This will generate a **new Contract ID**.
+2. **Update the Frontend:** Point your frontend application to the new Contract ID.
+3. **State Migration:** If the old contract has critical state (like `support_count`) that must be preserved, you must:
+   - Export the state from the old contract (via events or queries).
+   - Write a migration script or include an "initialization" function in the new contract that imports the old values.
+   - Note: For the current minimal version, a simple counter reset is usually acceptable for Dev/Testnet iterations.
+
+**Security Warning:** Always verify the new WASM hash against the source code before deploying to a production-like environment.
 
 Notes
 
