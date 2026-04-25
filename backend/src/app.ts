@@ -1832,50 +1832,112 @@ export function createApp(customLogger?: Logger) {
 
       const transactions = await prisma.supportTransaction.findMany({
         where: { supporterAddress: address },
-        include: { profile: true },
+        include: { profile: { select: { username: true, displayName: true } } },
         orderBy: { createdAt: "desc" },
       });
 
-      if (transactions.length === 0) {
-        return res.json({
-          address,
-          totalTransactions: 0,
-          profilesSupported: 0,
-          totalByAsset: {},
-          transactions: [],
-        });
-      }
-
       const profilesSupported = new Set(transactions.map((tx: any) => tx.profileId)).size;
-      const totalByAsset: Record<string, number> = {};
+      const assetMap = new Map<string, number>();
+      for (const tx of transactions) {
+        const key = tx.assetCode as string;
+        assetMap.set(key, (assetMap.get(key) ?? 0) + parseFloat(tx.amount.toString()));
+      }
+      const totalByAsset = Array.from(assetMap.entries()).map(([assetCode, total]) => ({
+        assetCode,
+        total: total.toFixed(7),
+      }));
 
-      transactions.forEach((tx: any) => {
-        const amount = parseFloat(tx.amount.toString());
-        const key = `${tx.assetCode}${tx.assetIssuer ? `:${tx.assetIssuer}` : ""}`;
-        totalByAsset[key] = (totalByAsset[key] || 0) + amount;
-      });
+      const recentTransactions = transactions.slice(0, 10).map((tx: any) => ({
+        profileUsername: tx.profile.username,
+        profileDisplayName: tx.profile.displayName,
+        amount: tx.amount.toString(),
+        assetCode: tx.assetCode,
+        createdAt: tx.createdAt,
+        txHash: tx.txHash,
+      }));
 
-      res.json({
+      return res.json({
         address,
         totalTransactions: transactions.length,
         profilesSupported,
         totalByAsset,
-        transactions: transactions.map((tx: any) => ({
-          id: tx.id,
-          amount: tx.amount.toString(),
-          assetCode: tx.assetCode,
-          assetIssuer: tx.assetIssuer,
-          txHash: tx.txHash,
-          createdAt: tx.createdAt,
-          profile: {
-            username: tx.profile.username,
-            displayName: tx.profile.displayName,
-          },
-        })),
+        recentTransactions,
       });
     } catch {
       return sendError(res, 500, "Internal server error");
     }
+  });
+
+  // ── Recurring Support ───────────────────────────────────────────────────
+
+  app.post("/recurring-support", requireAuth, writeLimiter, async (req, res) => {
+    const { profileId, amount, assetCode, frequency } = req.body;
+
+    if (!profileId || !amount || !frequency) {
+      return sendError(res, 400, "profileId, amount, and frequency are required");
+    }
+    if (frequency !== "weekly" && frequency !== "monthly") {
+      return sendError(res, 400, "frequency must be 'weekly' or 'monthly'");
+    }
+
+    const profile = await prisma.profile.findUnique({ where: { id: profileId } });
+    if (!profile) return sendError(res, 404, "Profile not found");
+
+    const user = await prisma.user.findFirst({ where: { email: req.auth!.walletAddress } });
+    if (!user) return sendError(res, 401, "User not found");
+
+    const nextRunAt = new Date();
+    if (frequency === "weekly") {
+      nextRunAt.setDate(nextRunAt.getDate() + 7);
+    } else {
+      nextRunAt.setDate(nextRunAt.getDate() + 30);
+    }
+
+    await prisma.recurringSupport.create({
+      data: {
+        supporterId: user.id,
+        profileId,
+        amount,
+        assetCode: assetCode ?? "XLM",
+        frequency,
+        nextRunAt,
+      },
+    });
+
+    return res.status(201).json({ message: "Recurring support created" });
+  });
+
+  app.get("/recurring-support", requireAuth, async (req, res) => {
+    const user = await prisma.user.findFirst({ where: { email: req.auth!.walletAddress } });
+    if (!user) return sendError(res, 401, "User not found");
+
+    const subscriptions = await prisma.recurringSupport.findMany({
+      where: { supporterId: user.id, status: { not: "cancelled" } },
+      include: { profile: { select: { username: true, displayName: true } } },
+      orderBy: { createdAt: "desc" },
+    });
+
+    return res.json(subscriptions);
+  });
+
+  app.patch("/recurring-support/:id", requireAuth, async (req, res) => {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    if (!status || (status !== "paused" && status !== "cancelled")) {
+      return sendError(res, 400, "status must be 'paused' or 'cancelled'");
+    }
+
+    const user = await prisma.user.findFirst({ where: { email: req.auth!.walletAddress } });
+    if (!user) return sendError(res, 401, "User not found");
+
+    const subscription = await prisma.recurringSupport.findUnique({ where: { id } });
+    if (!subscription) return sendError(res, 404, "Recurring support not found");
+    if (subscription.supporterId !== user.id) return sendError(res, 403, "Forbidden");
+
+    const updated = await prisma.recurringSupport.update({ where: { id }, data: { status } });
+
+    return res.json(updated);
   });
 
   app.get("/profiles/:username/analytics/timeseries", async (req, res) => {

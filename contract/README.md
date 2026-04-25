@@ -20,6 +20,16 @@ The MVP only needs to show clear Soroban intent for the Stellar Wave submission.
 - onchain profile ownership
 - milestones or attestations
 
+## Deployed Contract (Testnet)
+
+| Field | Value |
+|---|---|
+| Contract ID | `NEXT_PUBLIC_CONTRACT_ID` (set in `frontend/.env.local`) |
+| Network | Stellar Testnet |
+| Explorer | https://stellar.expert/explorer/testnet/contract/&lt;id&gt; |
+
+The contract ID is recorded in `frontend/.env.example` as `NEXT_PUBLIC_CONTRACT_ID`. After deploying, set the actual ID in `frontend/.env.local` (not committed) and update this table with the deployed contract ID and deployer address.
+
 ## Local Use
 
 ```bash
